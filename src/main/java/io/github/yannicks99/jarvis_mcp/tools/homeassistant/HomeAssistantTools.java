@@ -58,11 +58,18 @@ public class HomeAssistantTools {
 
         Optional<String> areaId = areas.resolve(area);
         if (areaId.isEmpty()) {
-            return areas.knownNames().isEmpty()
-                    ? "Es sind keine Bereiche konfiguriert - in JARVIS-MCP muss unter "
-                            + "jarvis-mcp.home-assistant.areas erst eine Zuordnung hinterlegt werden."
+            // Drei verschiedene Ursachen, drei verschiedene Antworten: Die KI soll einen falschen
+            // Namen noch einmal versuchen koennen, bei den beiden anderen Faellen waere jeder
+            // weitere Versuch vergeblich.
+            if (!areas.loadedFromHomeAssistant()) {
+                return "Die Bereiche konnten nicht aus Home Assistant gelesen werden - "
+                        + "Home Assistant ist gerade nicht erreichbar.";
+            }
+            List<String> known = areas.knownNames();
+            return known.isEmpty()
+                    ? "In Home Assistant sind keine Bereiche eingerichtet."
                     : "Der Bereich '%s' ist nicht bekannt. Bekannte Bereiche: %s."
-                            .formatted(area, String.join(", ", areas.knownNames()));
+                            .formatted(area, String.join(", ", known));
         }
 
         client.callService("light", parsed.get().service(), Map.of("area_id", areaId.get()));

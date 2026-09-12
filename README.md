@@ -22,7 +22,8 @@ LLM → MCP-Werkzeug set_light_power → JARVIS-MCP → Home-Assistant-REST-API 
 
 `power` nimmt `on` bzw. `off` entgegen (und ein paar naheliegende Varianten wie `an`/`aus`).
 Namen werden unabhängig von Groß-/Kleinschreibung und Umlautschreibweise erkannt: `Büro`,
-`buero` und `BÜRO` finden denselben Eintrag. Ist ein Name nicht eindeutig oder unbekannt, kommt
+`buero` und `BÜRO` finden denselben Eintrag. **Bereiche, Lichter und Routinen kommen alle aus
+Home Assistant** — es gibt nichts doppelt zu pflegen. Ist ein Name nicht eindeutig oder unbekannt, kommt
 eine Antwort mit den möglichen Namen zurück statt eines Protokollfehlers — das Modell kann es
 damit gleich noch einmal richtig versuchen.
 
@@ -40,7 +41,6 @@ docker compose up -d --build
 |---|---|
 | MCP-Endpunkt | `http://jarvis:8098/mcp` (Streamable HTTP, Bearer-Token) |
 | Health | `http://jarvis:8099/actuator/health` (ohne Token, fürs Monitoring Tool) |
-| Bereichskonfiguration | `config/application.yaml` — wird in den Container gemountet |
 
 Beide Ports binden an `0.0.0.0`, nicht an `127.0.0.1` — sonst wären sie weder über Tailscale
 erreichbar noch aus einem anderen Container. Genau das brauchen aber beide Abnehmer: Der
@@ -58,16 +58,21 @@ Das ist ein fremder Stack aus Sicht des Monitoring-Backends — der Rückweg lä
 der Selbstaufruf-Fallstrick des eigenen Stacks greift hier also nicht. Voraussetzung ist der dort
 bereits gesetzte `extra_hosts`-Eintrag `jarvis:host-gateway`.
 
-Die Bereiche und ihre Aliasse liegen bewusst außerhalb des Images. Ein neuer Bereich in Home
-Assistant braucht damit nur einen Neustart des Containers, keinen neuen Build:
+**Es gibt nichts zu konfigurieren.** Bereiche, Lichter und Routinen liest JARVIS-MCP aus Home
+Assistant — die Bereiche über dessen Template-Engine (`areas()` / `area_name()` via
+`POST /api/template`), den Rest über `GET /api/states`. Ein neuer Bereich oder ein neues Licht in
+Home Assistant ist damit sofort ansprechbar.
 
-```yaml
-jarvis-mcp:
-  home-assistant:
-    areas:
-      - id: arbeitszimmer          # die area_id aus Home Assistant
-        names: [Arbeitszimmer, Büro]
+Nur für den Ausnahmefall, dass ein Bereich anders angesprochen werden soll, als er in Home
+Assistant heißt (Home Assistant kennt dafür eigene Aliasse, gibt sie aber über keine
+REST-Schnittstelle heraus), gibt es eine Zeile in der `.env`:
+
+```bash
+SPRING_APPLICATION_JSON={"jarvis-mcp":{"home-assistant":{"areas":[{"id":"arbeitszimmer","names":["Büro"]}]}}}
 ```
+
+Die echten Namen aus Home Assistant funktionieren weiterhin. Meist ist es einfacher, den Bereich
+in Home Assistant gleich so zu nennen.
 
 ## Entwicklung
 
@@ -92,11 +97,13 @@ zusätzliches Paket dazu — an den bestehenden ist dafür nichts zu ändern.
 
 Die Namensauflösung ist der einzige Punkt, an dem ein Werkzeugaufruf teuer werden könnte:
 `set_light_power` und `run_ha_routine` brauchen dafür `GET /api/states`, und das liefert sämtliche
-Entitäten samt aller Attribute. Drei Entscheidungen halten das aus dem Antwortweg heraus:
+Entitäten samt aller Attribute; die Bereiche kosten einen weiteren Aufruf. Drei Entscheidungen
+halten das aus dem Antwortweg heraus:
 
-- **Der Index wird im Hintergrund warmgehalten** (Standard: alle 60 s). Ein Werkzeugaufruf kostet
-  im Normalfall einen Hash-Zugriff, keinen HTTP-Aufruf. Ein unbekannter Name löst ein sofortiges
-  Nachladen aus — gedeckelt, damit wiederholte Fehlgriffe Home Assistant nicht überziehen.
+- **Entitäten und Bereiche werden im Hintergrund warmgehalten** (Standard: alle 60 s). Ein
+  Werkzeugaufruf kostet im Normalfall einen Hash-Zugriff, keinen HTTP-Aufruf. Ein unbekannter Name
+  löst ein sofortiges Nachladen aus — gedeckelt, damit wiederholte Fehlgriffe Home Assistant nicht
+  überziehen.
 - **Die Antwort wird im Datenstrom gelesen**, nicht in Objekte verwandelt: Aus jedem Eintrag
   bleiben `entity_id` und `friendly_name`, alles andere wird übersprungen.
 - **Ein einziger HTTP-Client** hält die Verbindung zu Home Assistant offen, und alle Schreibweisen

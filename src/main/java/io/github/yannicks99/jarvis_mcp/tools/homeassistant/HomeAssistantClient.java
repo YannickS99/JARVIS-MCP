@@ -1,12 +1,14 @@
 package io.github.yannicks99.jarvis_mcp.tools.homeassistant;
 
 import io.github.yannicks99.jarvis_mcp.common.NameNormalizer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import tools.jackson.core.JsonParser;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.core.JsonToken;
 import tools.jackson.databind.ObjectMapper;
 
@@ -49,6 +51,60 @@ public class HomeAssistantClient {
                         return parseStates(parser, domains);
                     }
                 });
+    }
+
+    /**
+     * Liest die Bereiche aus Home Assistants Area Registry.
+     *
+     * <p>Die Registry hat keinen eigenen REST-Endpunkt - wohl aber die Template-Engine, und die
+     * ist ueber {@code POST /api/template} erreichbar. {@code areas()} liefert die Kennungen,
+     * {@code area_name()} den jeweiligen Anzeigenamen. Damit entfaellt der WebSocket-Client, der
+     * urspruenglich fuer diesen Zweck angedacht war, und vor allem entfaellt die Handpflege: Ein
+     * neuer Bereich in Home Assistant ist hier sofort bekannt.
+     *
+     * <p>{@code to_json} uebernimmt das Maskieren - ein Bereichsname mit Anfuehrungszeichen oder
+     * Umlauten kommt dadurch unbeschadet an, statt die Antwort zu zerlegen.
+     */
+    public List<HomeAssistantArea> areas() {
+        String template = "{{ [areas(), areas() | map('area_name') | list] | to_json }}";
+
+        String rendered = restClient.post()
+                .uri("/api/template")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_PLAIN)
+                .body(Map.of("template", template))
+                .exchange((request, response) -> {
+                    if (!response.getStatusCode().is2xxSuccessful()) {
+                        throw new HomeAssistantException("Home Assistant antwortete auf /api/template mit "
+                                + response.getStatusCode()
+                                + " - erlaubt das Long-Lived Access Token das Rendern von Templates?");
+                    }
+                    return new String(response.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                });
+
+        return parseAreas(rendered);
+    }
+
+    /** Erwartet {@code [["id1","id2"],["Name 1","Name 2"]]} - so baut es das Template oben. */
+    private List<HomeAssistantArea> parseAreas(String rendered) {
+        List<List<String>> pair;
+        try {
+            pair = jsonMapper.readValue(rendered, new TypeReference<List<List<String>>>() { });
+        } catch (RuntimeException ex) {
+            throw new HomeAssistantException(
+                    "Unerwartete Antwort auf /api/template: " + rendered.strip(), ex);
+        }
+        if (pair.size() != 2 || pair.get(0).size() != pair.get(1).size()) {
+            throw new HomeAssistantException("Unerwartete Antwort auf /api/template: " + rendered.strip());
+        }
+
+        List<String> ids = pair.get(0);
+        List<String> names = pair.get(1);
+        List<HomeAssistantArea> areas = new ArrayList<>(ids.size());
+        for (int i = 0; i < ids.size(); i++) {
+            areas.add(new HomeAssistantArea(ids.get(i), names.get(i)));
+        }
+        return areas;
     }
 
     /**

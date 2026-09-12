@@ -1,48 +1,104 @@
 package io.github.yannicks99.jarvis_mcp.tools.homeassistant;
 
 import io.github.yannicks99.jarvis_mcp.common.NameNormalizer;
+import io.github.yannicks99.jarvis_mcp.common.RefreshingCache;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.SequencedSet;
 
 /**
- * Loest Bereichsnamen und deren Aliasse auf Home-Assistant-{@code area_id}s auf.
+ * Loest Bereichsnamen auf Home-Assistant-{@code area_id}s auf.
  *
- * <p>Bewusst eine statische Zuordnung aus der Konfiguration (Anforderungskatalog 4a): Die echten
- * Bereichsaliasse stehen nur in Home Assistants Area Registry, und die gibt weder die Template-
- * Engine noch die REST-API heraus - nur die WebSocket-API. Ein zweiter Client mit eigenem
- * Handshake und eigenem Zwischenspeicher waere fuer eine Handvoll Bereiche, die sich praktisch nie
- * aendern, unverhaeltnismaessig.
+ * <p>Die Bereiche kommen aus Home Assistant selbst. Sie dort <em>und</em> hier zu pflegen waere
+ * doppelte Arbeit fuer dieselbe Information, und die beiden Stellen wuerden unweigerlich
+ * auseinanderlaufen. Geholt werden sie ueber die Template-Engine (siehe
+ * {@link HomeAssistantClient#areas()}); die urspruenglich dafuer angedachte WebSocket-Anbindung an
+ * die Area Registry ist damit unnoetig.
  *
- * <p>Die Zuordnung wird einmal beim Start in ihre Suchform gebracht; zur Laufzeit ist jede
- * Aufloesung ein Hash-Zugriff.
+ * <p>Die statische Konfiguration bleibt, aber nur noch als <em>Ergaenzung</em> fuer zusaetzliche
+ * Namen: Home Assistant kennt zwar eigene Bereichsaliasse, gibt sie aber ueber keine
+ * REST-Schnittstelle heraus. Wer einen Bereich anders ansprechen will, als er in Home Assistant
+ * heisst, traegt das hier ein - alle anderen brauchen die Konfiguration gar nicht mehr.
  */
 public class AreaResolver {
 
-    private final Map<String, String> byName;
-    private final List<String> knownNames;
+    private final RefreshingCache<AreaIndex> areas;
 
-    public AreaResolver(List<AreaMapping> configured) {
-        Map<String, String> index = HashMap.newHashMap(configured.size() * 4);
+    /** Zusaetzliche Namen aus der Konfiguration, einmal beim Start in Suchform gebracht. */
+    private final Map<String, String> configuredAliases;
+    private final List<String> configuredNames;
+
+    public AreaResolver(RefreshingCache<AreaIndex> areas, List<AreaMapping> configured) {
+        this.areas = areas;
+
+        Map<String, String> aliases = HashMap.newHashMap(configured.size() * 4);
         List<String> names = new ArrayList<>(configured.size());
-
         for (AreaMapping area : configured) {
-            // Die area_id selbst ist immer auch ein gueltiger Name - sonst muesste jeder Bereich,
-            // dessen Name ohnehin schon der Kennung entspricht, doppelt eingetragen werden.
-            register(index, area.id(), area.id());
+            register(aliases, area.id(), area.id());
             for (String name : area.names()) {
-                register(index, name, area.id());
+                register(aliases, name, area.id());
                 names.add(name);
             }
-            if (area.names().isEmpty()) {
-                names.add(area.id());
-            }
+        }
+        this.configuredAliases = Map.copyOf(aliases);
+        this.configuredNames = List.copyOf(names);
+    }
+
+    /**
+     * Leer, wenn der Name weder in Home Assistant noch in der Konfiguration vorkommt.
+     *
+     * <p>Zuerst Home Assistant, dann die konfigurierten Aliasse. Bleibt beides ohne Treffer, wird
+     * einmal neu geladen - der Bereich koennte gerade erst angelegt worden sein.
+     */
+    public Optional<String> resolve(String area) {
+        AreaIndex index = areas.get();
+
+        Optional<String> hit = lookup(index.byName(), area);
+        if (hit.isPresent()) {
+            return hit;
+        }
+        Optional<String> alias = lookup(configuredAliases, area);
+        if (alias.isPresent()) {
+            return alias;
         }
 
-        this.byName = Map.copyOf(index);
-        this.knownNames = List.copyOf(names);
+        AreaIndex reloaded = areas.refreshIfAllowed();
+        return reloaded == index ? Optional.empty() : lookup(reloaded.byName(), area);
+    }
+
+    /**
+     * Die ansprechbaren Bereichsnamen - fuer Fehlermeldungen, damit die KI es mit einem passenden
+     * Namen erneut versuchen kann. Ist Home Assistant gerade nicht erreichbar, bleiben die
+     * konfigurierten Namen uebrig.
+     */
+    public List<String> knownNames() {
+        SequencedSet<String> names = new LinkedHashSet<>();
+        try {
+            names.addAll(areas.get().names());
+        } catch (RuntimeException ex) {
+            // Ohne Home Assistant gibt es nichts zu ergaenzen - der Aufrufer meldet das ohnehin.
+        }
+        names.addAll(configuredNames);
+        return List.copyOf(names);
+    }
+
+    /** Ob die Bereiche schon einmal aus Home Assistant geladen werden konnten. */
+    public boolean loadedFromHomeAssistant() {
+        return areas.isLoaded();
+    }
+
+    private static Optional<String> lookup(Map<String, String> index, String area) {
+        for (String variant : NameNormalizer.variants(area)) {
+            String areaId = index.get(variant);
+            if (areaId != null) {
+                return Optional.of(areaId);
+            }
+        }
+        return Optional.empty();
     }
 
     private static void register(Map<String, String> index, String name, String areaId) {
@@ -51,19 +107,23 @@ public class AreaResolver {
         }
     }
 
-    /** Leer, wenn der Name in keiner Schreibweise bekannt ist. */
-    public Optional<String> resolve(String area) {
-        for (String variant : NameNormalizer.variants(area)) {
-            String areaId = byName.get(variant);
-            if (areaId != null) {
-                return Optional.of(areaId);
-            }
-        }
-        return Optional.empty();
-    }
+    /**
+     * Unveraenderliches Abbild der Bereiche aus Home Assistant: alle Schreibvarianten der Namen
+     * auf die jeweilige {@code area_id}, dazu die Anzeigenamen in Reihenfolge.
+     */
+    public record AreaIndex(Map<String, String> byName, List<String> names) {
 
-    /** Die konfigurierten Bereichsnamen in Eingabereihenfolge - fuer Fehlermeldungen. */
-    public List<String> knownNames() {
-        return knownNames;
+        public static AreaIndex of(List<HomeAssistantArea> areas) {
+            Map<String, String> byName = HashMap.newHashMap(areas.size() * 4);
+            List<String> names = new ArrayList<>(areas.size());
+            for (HomeAssistantArea area : areas) {
+                // Die area_id ist immer auch ein gueltiger Name - bei den meisten Bereichen ist
+                // sie ohnehin nur die kleingeschriebene Fassung des Namens.
+                register(byName, area.areaId(), area.areaId());
+                register(byName, area.name(), area.areaId());
+                names.add(area.name());
+            }
+            return new AreaIndex(Map.copyOf(byName), List.copyOf(names));
+        }
     }
 }
