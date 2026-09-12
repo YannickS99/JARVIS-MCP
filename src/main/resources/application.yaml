@@ -1,3 +1,92 @@
 spring:
   application:
     name: jarvis-mcp
+
+  # Jede Anfrage laeuft auf einem virtuellen Thread. Die Werkzeuge verbringen ihre Zeit fast
+  # ausschliesslich wartend auf Home Assistant - genau der Fall, fuer den virtuelle Threads da
+  # sind: Ein wartender Aufruf belegt keinen Betriebssystem-Thread mehr, und der Server bleibt
+  # auch dann antwortbereit, wenn Home Assistant traege ist.
+  threads:
+    virtual:
+      enabled: true
+
+  ai:
+    mcp:
+      server:
+        name: jarvis-mcp
+        # Wird beim Bauen aus der pom.xml eingesetzt - release.sh bumpt damit auch die Version,
+        # die der MCP-Client beim Handshake zu sehen bekommt.
+        version: '@project.version@'
+        # Streamable HTTP ist der aktuelle MCP-Transport und loest HTTP+SSE ab: kein dauerhaft
+        # offener Kanal noetig, der Normalfall ist ein schlichter Request/Response-Zyklus.
+        protocol: streamable
+        type: sync
+        streamable-http:
+          mcp-endpoint: /mcp
+        capabilities:
+          tool: true
+          # Ressourcen, Prompts und Vervollstaendigung bietet dieser Server (noch) nicht an. Sie
+          # abzuschalten haelt den Handshake und die Faehigkeitsliste klein.
+          resource: false
+          prompt: false
+          completion: false
+        # Knapp gehalten: Ein haengender Aufruf soll als Fehler zurueckkommen, solange der Nutzer
+        # noch auf eine gesprochene Antwort wartet.
+        request-timeout: 20s
+        instructions: >
+          Werkzeuge fuer das Zuhause von JARVIS. Ueber sie lassen sich Lichter einzeln oder
+          raumweise schalten und in Home Assistant hinterlegte Routinen (Szenen und Skripte)
+          ausloesen.
+
+server:
+  port: ${SERVER_PORT:8098}
+  shutdown: graceful
+
+management:
+  # Eigener Port fuer den Health-Endpunkt, damit das Monitoring Tool ihn ohne Token erreicht,
+  # waehrend der MCP-Endpunkt geschuetzt bleibt - dasselbe Muster wie beim JARVIS-AIService.
+  server:
+    port: ${MANAGEMENT_PORT:8099}
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+  info:
+    env:
+      enabled: true
+    build:
+      enabled: true
+
+jarvis-mcp:
+  auth:
+    # Geteiltes Geheimnis mit dem JARVIS-AIService. Leer bedeutet: keine Pruefung (mit deutlicher
+    # Warnung beim Start).
+    token: ${JARVIS_MCP_AUTH_TOKEN:}
+
+  home-assistant:
+    enabled: ${HA_ENABLED:true}
+    # Home Assistant laeuft auf JARVIS im Host-Netz auf Port 8123; aus einem Bridge-Container
+    # heraus ist der Host ueber host.docker.internal erreichbar.
+    base-url: ${HA_BASE_URL:}
+    # Long-Lived Access Token aus dem Home-Assistant-Profil.
+    token: ${HA_TOKEN:}
+    connect-timeout: ${HA_CONNECT_TIMEOUT:2s}
+    read-timeout: ${HA_READ_TIMEOUT:5s}
+    # Takt, in dem der Entitaeten-Index im Hintergrund erneuert wird. Ein Werkzeugaufruf trifft
+    # damit fast immer einen warmen Index und kostet keinen Home-Assistant-Abruf.
+    cache-ttl: ${HA_CACHE_TTL:60s}
+    min-refresh-interval: ${HA_MIN_REFRESH_INTERVAL:5s}
+    # Bereiche und ihre Aliasse (siehe Anforderungskatalog 4a). Hier bewusst leer: Im Betrieb
+    # wird die Zuordnung ueber config/application.yaml neben dem Jar gepflegt, damit ein neuer
+    # Bereich kein neues Image braucht. Beispiel siehe config/application.yaml im Projekt.
+    areas: []
+
+logging:
+  level:
+    root: INFO
+    io.github.yannicks99.jarvis_mcp: ${JARVIS_MCP_LOG_LEVEL:INFO}
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %-40.40logger{39} : %msg%n"

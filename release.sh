@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+#
+# Fuehrt einen vollstaendigen Git-Flow-Release durch - nicht nur den Versions-Bump.
+#
+#   ./release.sh 1.0.0
+#   ./release.sh            # zeigt die aktuelle Version
+#
+# Ablauf (siehe Obsidian-Notiz "Release-Skript - Git-Flow-Standard"):
+#
+#   1. Vorbedingungen pruefen   5. git flow release finish
+#   2. git flow release start   6. main pushen (inkl. Tag)
+#   3. Version bumpen           7. develop auf die naechste Patch-Version mit -SNAPSHOT
+#   4. Commit im Release-Branch 8. develop pushen
+#
+# Bump-Stelle dieses Projekts: pom.xml (Spring Boot / Maven).
+
+set -euo pipefail
+
+readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly POM="${ROOT_DIR}/pom.xml"
+readonly TOTAL_STEPS=8
+
+# Freigabeversionen sind immer X.Y.Z - Vorabkennzeichnungen wie -rc.1 haetten in diesem Ablauf
+# keinen Platz, weil Schritt 7 daraus die naechste Patch-Version ableitet.
+readonly VERSION_PATTERN='^[0-9]+\.[0-9]+\.[0-9]+$'
+
+readonly C_RESET=$'\033[0m'
+readonly C_STEP=$'\033[1;36m'
+readonly C_OK=$'\033[0;32m'
+readonly C_FAIL=$'\033[0;31m'
+readonly C_DIM=$'\033[0;90m'
+
+CURRENT_STEP=0
+# Wird gesetzt, sobald ein Release-Branch existiert - die Fehlerbehandlung erwaehnt ihn dann.
+RELEASE_BRANCH=""
+
+step() {
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    printf '%s==> [%d/%d] %s%s ... ' "${C_STEP}" "${CURRENT_STEP}" "${TOTAL_STEPS}" "$1" "${C_RESET}"
+}
+
+step_ok()   { printf '%s✅%s\n' "${C_OK}" "${C_RESET}"; }
+note()      { printf '    %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
+
+# Bricht mit einer Zustandsbeschreibung ab: Wichtiger als die Fehlerursache ist, in welchem
+# Zustand das Repository jetzt ist und was von Hand nachzuholen bleibt.
+fail() {
+    printf '%s❌%s\n' "${C_FAIL}" "${C_RESET}"
+    printf '\n%sFehler: %s%s\n' "${C_FAIL}" "$*" "${C_RESET}" >&2
+    if [[ -n "${RELEASE_BRANCH}" ]] && git -C "${ROOT_DIR}" rev-parse --verify --quiet "${RELEASE_BRANCH}" >/dev/null; then
+        printf '\n%sDer Release-Branch %s existiert noch und wurde nicht abgeschlossen.\n' "${C_DIM}" "${RELEASE_BRANCH}" >&2
+        printf 'Aktueller Branch: %s\n' "$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)" >&2
+        printf 'Aufraeumen z. B. mit: git flow release delete -f %s%s\n' "${RELEASE_BRANCH#release/}" "${C_RESET}" >&2
+    fi
+    exit 1
+}
+
+usage() {
+    cat <<EOF
+Verwendung: ./release.sh <version>
+
+  <version>   Freigabeversion im Format X.Y.Z, z. B. 1.0.0
+
+Fuehrt den kompletten Git-Flow-Release durch: Release-Branch anlegen, Version in der pom.xml
+setzen, committen, nach main und develop mergen, main taggen, beides pushen und develop auf die
+naechste Patch-Version mit -SNAPSHOT hochziehen.
+EOF
+}
+
+# Liest die Projektversion: das erste <version> nach dem Parent-Block. Bewusst ohne Maven-Aufruf,
+# damit die blosse Anzeige ohne JVM-Start auskommt.
+project_version() {
+    awk '
+        /<\/parent>/ { after_parent = 1; next }
+        after_parent && match($0, /<version>[^<]+<\/version>/) {
+            print substr($0, RSTART + 9, RLENGTH - 19)
+            exit
+        }
+    ' "${POM}"
+}
+
+# Setzt die Version ueber das Maven-Plugin statt per Textersatz: Das Plugin kennt den Aufbau der
+# pom.xml und fasst nur die Projektversion an, die Parent-Version bleibt unberuehrt. Anschliessend
+# wird nachgelesen - ein stillschweigend wirkungsloser Ersatz (die bekannte BSD-sed-Falle aus dem
+# JARVIS-AIService) faellt so sofort auf, statt einen halb durchgelaufenen Release zu hinterlassen.
+set_version() {
+    local target="$1" output
+    output="$(mktemp)"
+    if ! ( cd "${ROOT_DIR}" && ./mvnw -B -q versions:set \
+            -DnewVersion="${target}" \
+            -DgenerateBackupPoms=false \
+            -DprocessAllModules=true ) >"${output}" 2>&1; then
+        cat "${output}" >&2
+        rm -f "${output}"
+        return 1
+    fi
+    rm -f "${output}"
+
+    local actual
+    actual="$(project_version)"
+    [[ "${actual}" == "${target}" ]] || {
+        printf 'pom.xml steht nach dem Setzen auf "%s" statt auf "%s"\n' "${actual}" "${target}" >&2
+        return 1
+    }
+}
+
+# --- Aufruf ohne Argument: nur anzeigen ---------------------------------------------------------
+
+[[ -f "${POM}" ]] || fail "pom.xml nicht gefunden - laeuft das Skript im Projektwurzelverzeichnis?"
+
+if [[ $# -eq 0 ]]; then
+    printf 'Aktuelle Version: %s\n\n' "$(project_version)"
+    usage
+    exit 0
+fi
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+[[ $# -eq 1 ]] || fail "Es wird genau ein Argument erwartet: die neue Version"
+
+readonly VERSION="$1"
+readonly TAG_PREFIX="$(git -C "${ROOT_DIR}" config --get gitflow.prefix.versiontag || true)"
+
+printf '\n%sRelease %s%s\n\n' "${C_STEP}" "${VERSION}" "${C_RESET}"
+
+# --- [1/8] Vorbedingungen -----------------------------------------------------------------------
+
+step "Vorbedingungen pruefen"
+
+[[ "${VERSION}" =~ ${VERSION_PATTERN} ]] \
+    || fail "'${VERSION}' ist keine gueltige Freigabeversion (erwartet: X.Y.Z, z. B. 1.0.0)"
+
+git -C "${ROOT_DIR}" rev-parse --git-dir >/dev/null 2>&1 \
+    || fail "Kein Git-Repository"
+
+command -v git >/dev/null 2>&1 || fail "git wird benoetigt, ist aber nicht installiert"
+
+git flow version >/dev/null 2>&1 \
+    || fail "git flow ist nicht installiert (macOS: brew install git-flow-avh)"
+
+git -C "${ROOT_DIR}" config --get gitflow.branch.develop >/dev/null \
+    || fail "git flow ist in diesem Repository nicht initialisiert (git flow init)"
+
+readonly DEVELOP="$(git -C "${ROOT_DIR}" config --get gitflow.branch.develop)"
+readonly MAIN="$(git -C "${ROOT_DIR}" config --get gitflow.branch.master)"
+readonly BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
+
+[[ "${BRANCH}" == "${DEVELOP}" ]] \
+    || fail "Ein Release startet auf '${DEVELOP}', aktueller Branch ist aber '${BRANCH}'"
+
+git -C "${ROOT_DIR}" diff --quiet && git -C "${ROOT_DIR}" diff --cached --quiet \
+    || fail "Das Arbeitsverzeichnis ist nicht sauber - bitte erst committen oder verwerfen"
+
+git -C "${ROOT_DIR}" rev-parse --verify --quiet "refs/tags/${TAG_PREFIX}${VERSION}" >/dev/null \
+    && fail "Der Tag '${TAG_PREFIX}${VERSION}' existiert bereits - diese Version wurde schon veroeffentlicht"
+
+git -C "${ROOT_DIR}" rev-parse --verify --quiet "release/${VERSION}" >/dev/null \
+    && fail "Der Branch 'release/${VERSION}' existiert bereits - ein frueherer Lauf wurde nicht abgeschlossen"
+
+[[ -x "${ROOT_DIR}/mvnw" ]] || fail "mvnw fehlt oder ist nicht ausfuehrbar"
+
+step_ok
+note "${DEVELOP} → ${MAIN}, aktuelle Version: $(project_version)"
+
+# --- [2/8] Release-Branch -----------------------------------------------------------------------
+
+step "Release-Branch release/${VERSION} erstellen"
+git -C "${ROOT_DIR}" flow release start "${VERSION}" >/dev/null 2>&1 \
+    || fail "git flow release start ${VERSION} ist fehlgeschlagen"
+RELEASE_BRANCH="release/${VERSION}"
+step_ok
+
+# --- [3/8] Versions-Bump ------------------------------------------------------------------------
+
+step "Version in pom.xml auf ${VERSION} setzen"
+set_version "${VERSION}" || fail "Die Version konnte nicht auf ${VERSION} gesetzt werden"
+step_ok
+
+# --- [4/8] Commit -------------------------------------------------------------------------------
+
+step "Versions-Bump committen"
+git -C "${ROOT_DIR}" add pom.xml || fail "git add pom.xml ist fehlgeschlagen"
+git -C "${ROOT_DIR}" commit -m "Version ${VERSION}" >/dev/null \
+    || fail "Der Commit des Versions-Bumps ist fehlgeschlagen"
+step_ok
+
+# --- [5/8] Release abschliessen -----------------------------------------------------------------
+
+step "Release abschliessen (merge nach ${MAIN} und ${DEVELOP}, Tag setzen)"
+# -m setzt die Tag-Nachricht direkt, damit kein Editor aufgeht und der Lauf nicht haengt.
+git -C "${ROOT_DIR}" flow release finish -m "Release ${VERSION}" "${VERSION}" >/dev/null 2>&1 \
+    || fail "git flow release finish ${VERSION} ist fehlgeschlagen (Merge-Konflikt?)"
+RELEASE_BRANCH=""
+step_ok
+
+# --- [6/8] main pushen --------------------------------------------------------------------------
+
+step "${MAIN} samt Tag pushen"
+git -C "${ROOT_DIR}" push origin "${MAIN}" >/dev/null 2>&1 \
+    || fail "Der Push von ${MAIN} ist fehlgeschlagen - der Release liegt lokal bereits vollstaendig vor"
+git -C "${ROOT_DIR}" push origin "${TAG_PREFIX}${VERSION}" >/dev/null 2>&1 \
+    || fail "Der Push des Tags ${TAG_PREFIX}${VERSION} ist fehlgeschlagen"
+step_ok
+
+# --- [7/8] develop hochziehen -------------------------------------------------------------------
+
+# Git Flow laesst nach dem Finish auf develop stehen - dort geht die Entwicklung auf der naechsten
+# Patch-Version weiter, als Vorabstand gekennzeichnet.
+readonly NEXT_VERSION="$(awk -F. '{ printf "%s.%s.%s-SNAPSHOT", $1, $2, $3 + 1 }' <<<"${VERSION}")"
+
+step "${DEVELOP} auf ${NEXT_VERSION} setzen"
+git -C "${ROOT_DIR}" checkout "${DEVELOP}" >/dev/null 2>&1 \
+    || fail "Wechsel auf ${DEVELOP} fehlgeschlagen"
+set_version "${NEXT_VERSION}" || fail "Die Version konnte nicht auf ${NEXT_VERSION} gesetzt werden"
+git -C "${ROOT_DIR}" add pom.xml
+git -C "${ROOT_DIR}" commit -m "Entwicklung an ${NEXT_VERSION} fortsetzen" >/dev/null \
+    || fail "Der Commit der Entwicklungsversion ist fehlgeschlagen"
+step_ok
+
+# --- [8/8] develop pushen -----------------------------------------------------------------------
+
+step "${DEVELOP} pushen"
+git -C "${ROOT_DIR}" push origin "${DEVELOP}" >/dev/null 2>&1 \
+    || fail "Der Push von ${DEVELOP} ist fehlgeschlagen"
+step_ok
+
+printf '\n%s✅ Release %s ist veroeffentlicht.%s\n' "${C_OK}" "${VERSION}" "${C_RESET}"
+note "Tag ${TAG_PREFIX}${VERSION} auf ${MAIN}, ${DEVELOP} steht auf ${NEXT_VERSION}."

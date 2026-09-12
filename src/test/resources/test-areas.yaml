@@ -1,0 +1,9 @@
+# Prueft denselben Weg, den config/application.yaml im Betrieb nimmt - inklusive Umlauten, die als
+# Map-Schluessel nicht heil durch Springs Property-Binding kaemen (siehe AreaMapping).
+jarvis-mcp:
+  home-assistant:
+    areas:
+      - id: wohnzimmer
+        names: [Wohnzimmer]
+      - id: arbeitszimmer
+        names: [Arbeitszimmer, Büro]

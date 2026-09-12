@@ -1,0 +1,41 @@
+# JARVIS-MCP - die Integrationsschicht zwischen dem JARVIS-AIService und den Diensten im Haus.
+#
+# Start:  cp .env.example .env  &&  docker compose up -d --build
+#
+# Der Dienst spricht MCP ueber 8098 und meldet seinen Zustand ueber 8099. Beide Ports sind an
+# 0.0.0.0 gebunden - dasselbe Muster wie beim JARVIS-AIService (8095/8097) und aus demselben
+# Grund: Ein an 127.0.0.1 gebundener Hostport ist weder ueber Tailscale erreichbar noch aus einem
+# anderen Container heraus. Beide Abnehmer brauchen aber genau das - der AIService laeuft in
+# einem eigenen Compose-Stack, und die Health-Pruefungen des Monitoring Tools laufen in dessen
+# Backend-Container. Der MCP-Endpunkt ist durch das Bearer-Token geschuetzt, der Health-Endpunkt
+# ist bewusst offen, damit das Monitoring Tool ihn ohne Sonder-Header abfragen kann.
+
+name: jarvis-mcp
+
+services:
+  jarvis-mcp:
+    build:
+      context: .
+    container_name: jarvis-mcp
+    restart: unless-stopped
+    environment:
+      # Geteiltes Geheimnis mit dem JARVIS-AIService. Ohne diesen Wert laeuft der MCP-Endpunkt
+      # ungeschuetzt - die Anwendung sagt das beim Start deutlich.
+      JARVIS_MCP_AUTH_TOKEN: ${JARVIS_MCP_AUTH_TOKEN:?JARVIS_MCP_AUTH_TOKEN muss in der .env gesetzt sein}
+      # Home Assistant laeuft auf JARVIS im Host-Netz (network_mode: host, Port 8123) und ist aus
+      # diesem Bridge-Container ueber host.docker.internal erreichbar.
+      HA_BASE_URL: ${HA_BASE_URL:-http://host.docker.internal:8123}
+      HA_TOKEN: ${HA_TOKEN:?HA_TOKEN muss in der .env gesetzt sein}
+      HA_CACHE_TTL: ${HA_CACHE_TTL:-60s}
+      JARVIS_MCP_LOG_LEVEL: ${JARVIS_MCP_LOG_LEVEL:-INFO}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      # Bereiche und Aliasse liegen bewusst ausserhalb des Images: Ein neuer Bereich in Home
+      # Assistant braucht damit nur einen Neustart des Containers, keinen neuen Build.
+      - ./config:/app/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Kein Loopback-Praefix: siehe Begruendung im Kopf dieser Datei.
+      - "${MCP_PORT:-8098}:8098"
+      - "${HEALTH_PORT:-8099}:8099"

@@ -11,21 +11,9 @@
 	<groupId>io.github.yannicks99</groupId>
 	<artifactId>jarvis-mcp</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
+	<name>jarvis-mcp</name>
+	<description>MCP-Integrationsschicht zwischen dem JARVIS-AIService und den Diensten im Haus</description>
+	<url>https://github.com/YannickS99/JARVIS-MCP</url>
 	<properties>
 		<java.version>25</java.version>
 		<spring-ai.version>2.0.1</spring-ai.version>
@@ -77,6 +65,16 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<executions>
+					<execution>
+						<!-- Schreibt Version und Bauzeitpunkt in die build-info.properties, damit
+						     /actuator/info sie ausweist - so laesst sich am laufenden Container
+						     ablesen, welcher Release dort tatsaechlich steht. -->
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
