@@ -41,7 +41,6 @@ docker compose up -d --build
 |---|---|
 | MCP-Endpunkt | `http://jarvis:8098/mcp` (Streamable HTTP, Bearer-Token) |
 | Health | `http://jarvis:8099/actuator/health` (ohne Token, fürs Monitoring Tool) |
-| Zusätzliche Bereichsnamen (optional) | `config/application.yaml` — wird in den Container gemountet |
 
 Beide Ports binden an `0.0.0.0`, nicht an `127.0.0.1` — sonst wären sie weder über Tailscale
 erreichbar noch aus einem anderen Container. Genau das brauchen aber beide Abnehmer: Der
@@ -59,23 +58,21 @@ Das ist ein fremder Stack aus Sicht des Monitoring-Backends — der Rückweg lä
 der Selbstaufruf-Fallstrick des eigenen Stacks greift hier also nicht. Voraussetzung ist der dort
 bereits gesetzte `extra_hosts`-Eintrag `jarvis:host-gateway`.
 
-**Die Bereiche werden nicht konfiguriert** — JARVIS-MCP liest sie über Home Assistants
-Template-Engine (`areas()` / `area_name()` via `POST /api/template`) und hält sie im selben Takt
-warm wie die Entitäten. Ein neuer Bereich in Home Assistant ist damit sofort ansprechbar.
+**Es gibt nichts zu konfigurieren.** Bereiche, Lichter und Routinen liest JARVIS-MCP aus Home
+Assistant — die Bereiche über dessen Template-Engine (`areas()` / `area_name()` via
+`POST /api/template`), den Rest über `GET /api/states`. Ein neuer Bereich oder ein neues Licht in
+Home Assistant ist damit sofort ansprechbar.
 
-`config/application.yaml` braucht es nur für einen Bereich, der anders angesprochen werden soll,
-als er in Home Assistant heißt. Home Assistant kennt dafür zwar eigene Bereichsaliasse, gibt sie
-aber über keine REST-Schnittstelle heraus:
+Nur für den Ausnahmefall, dass ein Bereich anders angesprochen werden soll, als er in Home
+Assistant heißt (Home Assistant kennt dafür eigene Aliasse, gibt sie aber über keine
+REST-Schnittstelle heraus), gibt es eine Zeile in der `.env`:
 
-```yaml
-jarvis-mcp:
-  home-assistant:
-    areas:
-      - id: arbeitszimmer     # heißt in HA "Arbeitszimmer", gesprochen "Büro"
-        names: [Büro]
+```bash
+SPRING_APPLICATION_JSON={"jarvis-mcp":{"home-assistant":{"areas":[{"id":"arbeitszimmer","names":["Büro"]}]}}}
 ```
 
-Die echten Namen aus Home Assistant funktionieren weiterhin, auch ohne Eintrag.
+Die echten Namen aus Home Assistant funktionieren weiterhin. Meist ist es einfacher, den Bereich
+in Home Assistant gleich so zu nennen.
 
 ## Entwicklung
 

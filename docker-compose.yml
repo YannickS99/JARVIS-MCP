@@ -28,12 +28,11 @@ services:
       HA_TOKEN: ${HA_TOKEN:?HA_TOKEN muss in der .env gesetzt sein}
       HA_CACHE_TTL: ${HA_CACHE_TTL:-60s}
       JARVIS_MCP_LOG_LEVEL: ${JARVIS_MCP_LOG_LEVEL:-INFO}
+      # Nur fuer den Ausnahmefall, dass ein Bereich anders angesprochen werden soll, als er in
+      # Home Assistant heisst - die Bereiche selbst holt sich JARVIS-MCP von dort. Beispiel:
+      # SPRING_APPLICATION_JSON='{"jarvis-mcp":{"home-assistant":{"areas":[{"id":"arbeitszimmer","names":["Büro"]}]}}}'
+      SPRING_APPLICATION_JSON: ${SPRING_APPLICATION_JSON:-}
       TZ: ${TZ:-Europe/Berlin}
-    volumes:
-      # Optional. Die Bereiche holt sich JARVIS-MCP selbst aus Home Assistant; hier stehen nur
-      # zusaetzliche Namen fuer Bereiche, die anders angesprochen werden sollen als sie dort
-      # heissen. Ausserhalb des Images, damit eine Aenderung nur einen Neustart braucht.
-      - ./config:/app/config:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
