@@ -13,6 +13,10 @@
 #   4. Commit im Release-Branch 8. develop pushen
 #
 # Bump-Stelle dieses Projekts: pom.xml (Spring Boot / Maven).
+#
+# Die beiden Commits heissen einheitlich "Version bump to <version>" - im Release-Branch mit der
+# Freigabeversion, auf develop mit der naechsten Patch-Version samt -SNAPSHOT. Dieselbe Schreibweise
+# nutzen die uebrigen JARVIS-Projekte, damit ein Blick in den Verlauf ueberall dasselbe zeigt.
 
 set -euo pipefail
 
@@ -222,7 +226,7 @@ if git -C "${ROOT_DIR}" diff --cached --quiet; then
     step_ok
     note "pom.xml stand bereits auf ${VERSION} - kein Commit noetig"
 else
-    run git -C "${ROOT_DIR}" commit -m "Version ${VERSION}" \
+    run git -C "${ROOT_DIR}" commit -m "Version bump to ${VERSION}" \
         || fail "Der Commit des Versions-Bumps ist fehlgeschlagen"
     step_ok
 fi
@@ -273,7 +277,7 @@ if git -C "${ROOT_DIR}" diff --cached --quiet; then
     step_ok
     note "pom.xml stand bereits auf ${NEXT_VERSION} - kein Commit noetig"
 else
-    run git -C "${ROOT_DIR}" commit -m "Entwicklung an ${NEXT_VERSION} fortsetzen" \
+    run git -C "${ROOT_DIR}" commit -m "Version bump to ${NEXT_VERSION}" \
         || fail "Der Commit der Entwicklungsversion ist fehlgeschlagen"
     step_ok
 fi
