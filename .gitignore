@@ -1,0 +1,62 @@
+# ---- Maven ----
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ---- Gradle (falls du doch mal Gradle statt Maven nutzt) ----
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ---- Spring Boot ----
+HELP.md
+*.pid
+application-local.yml
+application-local.yaml
+application-local.properties
+
+# ---- IntelliJ IDEA ----
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# ---- Eclipse / STS (falls mal jemand anders mit Eclipse ranmuss) ----
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+
+# ---- VS Code ----
+.vscode/
+
+# ---- Umgebungsvariablen / Secrets ----
+.env
+.env.local
+*.env
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Sonstiges ----
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
