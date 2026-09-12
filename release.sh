@@ -231,10 +231,20 @@ fi
 
 step "Release abschliessen (merge nach ${MAIN} und ${DEVELOP}, Tag setzen)"
 # Merge, Tag und das Aufraeumen des Release-Branches macht git flow selbst - dafuer ist es da.
+#
+# --no-ff ist hier nicht optional, sondern der Kern des Git-Flow-Verlaufsbildes: Ist main seit dem
+# Abzweig unveraendert geblieben - der Normalfall -, koennte der Release-Branch einfach
+# vorgespult werden. Dann verschwindet er aber spurlos, der Tag landet auf dem nackten
+# Bump-Commit, und im Verlauf sieht es aus, als waere die Version direkt auf main gesetzt worden.
+# Mit --no-ff entsteht der uebliche "Merge branch 'release/X'"-Commit auf main, und der Tag sitzt
+# darauf. Bewusst als Option im Skript statt als Repo-Konfiguration: git-flow-next kennt dafuer
+# keinen Konfigurationsschluessel, und so haengt das Ergebnis nicht daran, wie ein Repo
+# eingerichtet wurde.
+#
 # -m setzt die Tag-Nachricht mit, damit kein Editor aufgeht und der Lauf nicht haengt.
 # --no-push, weil die Pushes bewusst als eigene Schritte folgen: So sagt die Schrittanzeige, was
 # gerade passiert, und ein gescheiterter Push ist von einem gescheiterten Merge unterscheidbar.
-run git -C "${ROOT_DIR}" flow release finish -m "Release ${VERSION}" --no-push "${VERSION}" \
+run git -C "${ROOT_DIR}" flow release finish -m "Release ${VERSION}" --no-ff --no-push "${VERSION}" \
     || fail "git flow release finish ${VERSION} ist fehlgeschlagen (Merge-Konflikt?)"
 RELEASE_BRANCH=""
 step_ok

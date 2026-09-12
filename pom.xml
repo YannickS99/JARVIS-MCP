@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>io.github.yannicks99</groupId>
 	<artifactId>jarvis-mcp</artifactId>
-	<version>1.0.0</version>
+	<version>1.0.1</version>
 	<name>jarvis-mcp</name>
 	<description>MCP-Integrationsschicht zwischen dem JARVIS-AIService und den Diensten im Haus</description>
 	<url>https://github.com/YannickS99/JARVIS-MCP</url>
