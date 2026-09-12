@@ -48,11 +48,10 @@ step() {
 step_ok()   { printf '%s✅%s\n' "${C_OK}" "${C_RESET}"; }
 note()      { printf '    %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
 
-# Bricht mit einer Zustandsbeschreibung ab: Wichtiger als die Fehlerursache ist, in welchem
-# Zustand das Repository jetzt ist und was von Hand nachzuholen bleibt.
 # Fuehrt einen Befehl aus und haelt dessen Ausgabe zurueck - aber nur, solange er gelingt.
 # Scheitert er, wird alles gezeigt, was er gesagt hat. Die Ausgabe stumm wegzuwerfen hat beim
-# ersten echten Release genau das verdeckt, worauf es ankam (siehe Kommentar bei Schritt 5).
+# ersten echten Release genau das verdeckt, worauf es ankam: Sichtbar war nur "ist fehlgeschlagen
+# (Merge-Konflikt?)", waehrend die eigentliche Meldung eine ganz andere Ursache nannte.
 LAST_OUTPUT=""
 run() {
     LAST_OUTPUT="$("$@" 2>&1)" && return 0
@@ -60,6 +59,8 @@ run() {
     return ${status}
 }
 
+# Bricht mit einer Zustandsbeschreibung ab: Wichtiger als die Fehlerursache ist, in welchem
+# Zustand das Repository jetzt ist und was von Hand nachzuholen bleibt.
 fail() {
     printf '%s❌%s\n' "${C_FAIL}" "${C_RESET}"
     printf '\n%sFehler: %s%s\n' "${C_FAIL}" "$*" "${C_RESET}" >&2
