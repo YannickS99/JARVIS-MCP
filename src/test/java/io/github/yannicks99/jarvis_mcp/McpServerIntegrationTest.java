@@ -56,6 +56,8 @@ class McpServerIntegrationTest {
                 StubHomeAssistant.entity("light.stehlampe", "Stehlampe"),
                 StubHomeAssistant.entity("light.buero_decke", "Bürolicht"),
                 StubHomeAssistant.entity("script.gute_nacht", "Gute Nacht")));
+        // Die Bereiche kommen aus Home Assistant - "Arbeitszimmer" steht in keiner Konfiguration.
+        homeAssistant.areas("wohnzimmer", "Wohnzimmer", "arbeitszimmer", "Arbeitszimmer");
     }
 
     @AfterAll
@@ -126,6 +128,21 @@ class McpServerIntegrationTest {
                 .containsOnlyKeys("area", "power");
         assertThat(areaTool.inputSchema()).extracting("required", InstanceOfAssertFactories.LIST)
                 .containsExactlyInAnyOrder("area", "power");
+    }
+
+    @Test
+    @DisplayName("ein Bereich aus Home Assistant wird ohne jede Konfiguration gefunden")
+    void switchesAreaFromHomeAssistant() {
+        client = connect("geheim");
+
+        McpSchema.CallToolResult result = call("set_area_lights_power",
+                Map.of("area", "Arbeitszimmer", "power", "on"));
+
+        assertThat(result.isError()).isFalse();
+        assertThat(homeAssistant.calls()).singleElement().satisfies(serviceCall -> {
+            assertThat(serviceCall.service()).isEqualTo("turn_on");
+            assertThat(serviceCall.body()).contains("\"area_id\":\"arbeitszimmer\"");
+        });
     }
 
     @Test

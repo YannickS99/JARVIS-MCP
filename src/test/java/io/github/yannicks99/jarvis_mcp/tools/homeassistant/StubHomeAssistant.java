@@ -27,8 +27,12 @@ public final class StubHomeAssistant implements AutoCloseable {
     private final HttpServer server;
     private final List<ServiceCall> calls = new CopyOnWriteArrayList<>();
     private final AtomicInteger stateRequests = new AtomicInteger();
+    private final AtomicInteger templateRequests = new AtomicInteger();
 
     private volatile String statesBody;
+    /** Antwort auf /api/template - das Rendern selbst bildet der Stub nicht nach. */
+    private volatile String templateBody = "[[],[]]";
+    private volatile int templateStatus = 200;
     private volatile int statesStatus = 200;
     private volatile int serviceStatus = 200;
 
@@ -36,6 +40,7 @@ public final class StubHomeAssistant implements AutoCloseable {
         this.statesBody = statesBody;
         this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api/states", this::handleStates);
+        server.createContext("/api/template", this::handleTemplate);
         server.createContext("/api/services/", this::handleService);
         server.start();
     }
@@ -54,6 +59,37 @@ public final class StubHomeAssistant implements AutoCloseable {
 
     public void statesBody(String body) {
         this.statesBody = body;
+    }
+
+    /** Bereiche, die {@code areas()} liefern soll - als id/name-Paare. */
+    public void areas(String... idNamePairs) {
+        StringBuilder ids = new StringBuilder("[");
+        StringBuilder names = new StringBuilder("[");
+        for (int i = 0; i < idNamePairs.length; i += 2) {
+            if (i > 0) {
+                ids.append(',');
+                names.append(',');
+            }
+            ids.append('"').append(idNamePairs[i]).append('"');
+            names.append('"').append(idNamePairs[i + 1]).append('"');
+        }
+        this.templateBody = ids.append("],").append(names).append("]]").insert(0, "[").toString();
+    }
+
+    public void templateStatus(int status) {
+        this.templateStatus = status;
+    }
+
+    private void handleTemplate(HttpExchange exchange) throws IOException {
+        templateRequests.incrementAndGet();
+        try (InputStream in = exchange.getRequestBody()) {
+            in.readAllBytes();
+        }
+        respond(exchange, templateStatus, templateStatus == 200 ? templateBody : "unauthorized");
+    }
+
+    public int templateRequests() {
+        return templateRequests.get();
     }
 
     public void statesStatus(int status) {

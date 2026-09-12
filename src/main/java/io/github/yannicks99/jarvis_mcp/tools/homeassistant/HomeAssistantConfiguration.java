@@ -1,5 +1,6 @@
 package io.github.yannicks99.jarvis_mcp.tools.homeassistant;
 
+import io.github.yannicks99.jarvis_mcp.common.RefreshingCache;
 import java.net.http.HttpClient;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -76,24 +77,26 @@ public class HomeAssistantConfiguration {
                 properties.cacheTtl(), properties.minRefreshInterval());
     }
 
+    /**
+     * Die Bereiche kommen aus Home Assistant und werden im selben Takt warmgehalten wie die
+     * Entitaeten - ein Werkzeugaufruf kostet damit auch hier nur einen Hash-Zugriff.
+     */
     @Bean
-    AreaResolver areaResolver(HomeAssistantProperties properties) {
-        AreaResolver resolver = new AreaResolver(properties.areas());
+    RefreshingCache<AreaResolver.AreaIndex> homeAssistantAreaIndex(HomeAssistantClient client,
+            HomeAssistantProperties properties) {
+        return new RefreshingCache<>("Bereiche", () -> AreaResolver.AreaIndex.of(client.areas()),
+                properties.cacheTtl(), properties.minRefreshInterval());
+    }
 
-        if (resolver.knownNames().isEmpty()) {
-            // Als Warnung, nicht als beilaeufige Notiz: Ohne Bereiche ist set_area_lights_power
-            // funktionsunfaehig, und die Ursache liegt ausserhalb der Anwendung. Die Bereiche
-            // kommen aus config/application.yaml neben dem Jar, das im Betrieb als Volume in den
-            // Container gemountet wird - fehlt der Mount, startet der Dienst fehlerfrei und das
-            // Werkzeug antwortet trotzdem auf jede Anfrage mit "Bereich nicht bekannt".
-            log.warn("Keine Home-Assistant-Bereiche konfiguriert - set_area_lights_power wird jede "
-                    + "Anfrage ablehnen. Erwartet wird eine Liste unter jarvis-mcp.home-assistant.areas "
-                    + "in config/application.yaml neben dem Jar (im Container /app/config/application.yaml, "
-                    + "per Volume gemountet). Pruefen mit: docker exec <container> cat /app/config/application.yaml");
-        } else {
-            log.info("Home-Assistant-Bereiche konfiguriert: {}", String.join(", ", resolver.knownNames()));
+    @Bean
+    AreaResolver areaResolver(RefreshingCache<AreaResolver.AreaIndex> areaIndex,
+            HomeAssistantProperties properties) {
+
+        if (!properties.areas().isEmpty()) {
+            log.info("Zusaetzliche Bereichsnamen aus der Konfiguration: {}",
+                    properties.areas().stream().flatMap(area -> area.names().stream()).toList());
         }
-        return resolver;
+        return new AreaResolver(areaIndex, properties.areas());
     }
 
     @Bean
@@ -111,29 +114,49 @@ public class HomeAssistantConfiguration {
      * hochkommt als JARVIS-MCP, denn der naechste Takt holt es nach.
      */
     @Bean
-    IndexWarmer indexWarmer(HomeAssistantEntityIndex index) {
-        return new IndexWarmer(index);
+    IndexWarmer indexWarmer(HomeAssistantEntityIndex entities,
+            RefreshingCache<AreaResolver.AreaIndex> areas) {
+        return new IndexWarmer(entities, areas);
     }
 
     static class IndexWarmer {
 
-        private final HomeAssistantEntityIndex index;
+        private static final Logger warmLog = LoggerFactory.getLogger(IndexWarmer.class);
 
-        IndexWarmer(HomeAssistantEntityIndex index) {
-            this.index = index;
+        private final HomeAssistantEntityIndex entities;
+        private final RefreshingCache<AreaResolver.AreaIndex> areas;
+
+        IndexWarmer(HomeAssistantEntityIndex entities, RefreshingCache<AreaResolver.AreaIndex> areas) {
+            this.entities = entities;
+            this.areas = areas;
         }
 
         @EventListener(ApplicationReadyEvent.class)
         void warmUp() {
             // In einem eigenen (virtuellen) Thread, damit ein nicht erreichbares Home Assistant den
             // Start nicht um das Verbindungs-Zeitlimit verzoegert.
-            Thread.startVirtualThread(index::refreshQuietly);
+            Thread.startVirtualThread(() -> {
+                refresh();
+                // Der erste Lauf sagt ausdruecklich, ob Home Assistant ueberhaupt erreichbar war.
+                // Ohne diese Zeile startet der Dienst fehlerfrei und die Werkzeuge scheitern
+                // trotzdem bei jedem Aufruf - die Ursache liegt dann ausserhalb der Anwendung
+                // (Netz, Firewall, Token) und soll im Log stehen, nicht erst im Fehlerfall.
+                try {
+                    List<String> names = areas.get().names();
+                    warmLog.info("Home Assistant erreichbar, {} Bereiche gefunden: {}",
+                            names.size(), names.isEmpty() ? "(keine)" : String.join(", ", names));
+                } catch (RuntimeException ex) {
+                    warmLog.warn("Home Assistant ist nicht erreichbar - alle Werkzeuge werden "
+                            + "scheitern, bis das behoben ist. Ursache: {}", ex.getMessage());
+                }
+            });
         }
 
         @Scheduled(fixedDelayString = "${jarvis-mcp.home-assistant.cache-ttl:60s}",
                 initialDelayString = "${jarvis-mcp.home-assistant.cache-ttl:60s}")
         void refresh() {
-            index.refreshQuietly();
+            entities.refreshQuietly();
+            areas.refreshQuietly();
         }
     }
 }

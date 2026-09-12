@@ -30,8 +30,9 @@ services:
       JARVIS_MCP_LOG_LEVEL: ${JARVIS_MCP_LOG_LEVEL:-INFO}
       TZ: ${TZ:-Europe/Berlin}
     volumes:
-      # Bereiche und Aliasse liegen bewusst ausserhalb des Images: Ein neuer Bereich in Home
-      # Assistant braucht damit nur einen Neustart des Containers, keinen neuen Build.
+      # Optional. Die Bereiche holt sich JARVIS-MCP selbst aus Home Assistant; hier stehen nur
+      # zusaetzliche Namen fuer Bereiche, die anders angesprochen werden sollen als sie dort
+      # heissen. Ausserhalb des Images, damit eine Aenderung nur einen Neustart braucht.
       - ./config:/app/config:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"

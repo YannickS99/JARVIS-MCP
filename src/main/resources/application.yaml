@@ -79,9 +79,11 @@ jarvis-mcp:
     # damit fast immer einen warmen Index und kostet keinen Home-Assistant-Abruf.
     cache-ttl: ${HA_CACHE_TTL:60s}
     min-refresh-interval: ${HA_MIN_REFRESH_INTERVAL:5s}
-    # Bereiche und ihre Aliasse (siehe Anforderungskatalog 4a). Hier bewusst leer: Im Betrieb
-    # wird die Zuordnung ueber config/application.yaml neben dem Jar gepflegt, damit ein neuer
-    # Bereich kein neues Image braucht. Beispiel siehe config/application.yaml im Projekt.
+    # Zusaetzliche Namen fuer einzelne Bereiche. Normalerweise leer: Die Bereiche kommen aus
+    # Home Assistant selbst (ueber dessen Template-Engine). Ein Eintrag ist nur noetig, wenn ein
+    # Bereich anders angesprochen werden soll, als er dort heisst - Home Assistants eigene
+    # Bereichsaliasse gibt keine REST-Schnittstelle heraus. Gepflegt wird das im Betrieb ueber
+    # config/application.yaml neben dem Jar.
     areas: []
 
 logging:

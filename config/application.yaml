@@ -1,27 +1,28 @@
-# Betriebskonfiguration, die neben dem Jar liegt statt darin.
+# Optionale Betriebskonfiguration, die neben dem Jar liegt statt darin.
 #
-# Spring Boot liest diese Datei automatisch aus dem Ordner "config" neben der Anwendung und legt
-# ihre Werte ueber die in application.yaml eingebauten. Im Container wird der Ordner
-# hineingemountet (siehe docker-compose.yml) - eine Aenderung braucht damit nur einen Neustart des
-# Containers, kein neues Image.
+# Diese Datei wird im Normalfall NICHT gebraucht. Die Bereiche holt sich JARVIS-MCP selbst aus
+# Home Assistant (ueber dessen Template-Engine), damit dieselbe Information nicht an zwei Stellen
+# gepflegt werden muss.
+#
+# Noetig ist ein Eintrag hier nur fuer einen Bereich, der anders angesprochen werden soll, als er
+# in Home Assistant heisst. Home Assistant kennt dafuer zwar eigene Bereichsaliasse, gibt sie aber
+# ueber keine REST-Schnittstelle heraus - deshalb diese Ergaenzung.
+#
+# Spring Boot liest die Datei automatisch aus dem Ordner "config" neben der Anwendung; im
+# Container wird der Ordner hineingemountet (siehe docker-compose.yml). Eine Aenderung braucht
+# damit nur einen Neustart des Containers, kein neues Image.
 
 jarvis-mcp:
   home-assistant:
-    # Die Bereiche aus Home Assistant und die Namen, unter denen sie angesprochen werden duerfen.
-    #
-    # "id" ist die area_id aus Home Assistant (Einstellungen → Bereiche & Zonen; meist der
-    # kleingeschriebene Name). Sie ist immer auch ein gueltiger Name und muss unter "names" nicht
-    # wiederholt werden - dort stehen nur Bezeichnungen, die davon abweichen.
+    # Zusaetzliche Namen fuer einen Bereich. "id" ist die area_id aus Home Assistant
+    # (Einstellungen → Bereiche & Zonen). Die echten Namen aus Home Assistant funktionieren
+    # weiterhin, auch wenn sie hier nicht stehen.
     #
     # Gross-/Kleinschreibung, Bindestriche und die Schreibweise von Umlauten sind egal: "Büro",
     # "buero" und "BÜRO" finden denselben Eintrag.
-    areas:
-      - id: wohnzimmer
-        names: [Wohnzimmer, Stube]
-      - id: kueche
-        names: [Küche]
-      - id: schlafzimmer
-        names: [Schlafzimmer]
-      # In Home Assistant heisst der Bereich "Arbeitszimmer", gesprochen wird er "Büro".
-      - id: arbeitszimmer
-        names: [Arbeitszimmer, Büro]
+    areas: []
+    # Beispiel - in Home Assistant heisst der Bereich "Arbeitszimmer", gesprochen wird er "Büro":
+    #
+    # areas:
+    #   - id: arbeitszimmer
+    #     names: [Büro]
