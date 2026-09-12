@@ -79,8 +79,20 @@ public class HomeAssistantConfiguration {
     @Bean
     AreaResolver areaResolver(HomeAssistantProperties properties) {
         AreaResolver resolver = new AreaResolver(properties.areas());
-        log.info("Home-Assistant-Bereiche konfiguriert: {}",
-                resolver.knownNames().isEmpty() ? "(keine)" : String.join(", ", resolver.knownNames()));
+
+        if (resolver.knownNames().isEmpty()) {
+            // Als Warnung, nicht als beilaeufige Notiz: Ohne Bereiche ist set_area_lights_power
+            // funktionsunfaehig, und die Ursache liegt ausserhalb der Anwendung. Die Bereiche
+            // kommen aus config/application.yaml neben dem Jar, das im Betrieb als Volume in den
+            // Container gemountet wird - fehlt der Mount, startet der Dienst fehlerfrei und das
+            // Werkzeug antwortet trotzdem auf jede Anfrage mit "Bereich nicht bekannt".
+            log.warn("Keine Home-Assistant-Bereiche konfiguriert - set_area_lights_power wird jede "
+                    + "Anfrage ablehnen. Erwartet wird eine Liste unter jarvis-mcp.home-assistant.areas "
+                    + "in config/application.yaml neben dem Jar (im Container /app/config/application.yaml, "
+                    + "per Volume gemountet). Pruefen mit: docker exec <container> cat /app/config/application.yaml");
+        } else {
+            log.info("Home-Assistant-Bereiche konfiguriert: {}", String.join(", ", resolver.knownNames()));
+        }
         return resolver;
     }
 
