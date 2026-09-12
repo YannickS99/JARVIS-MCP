@@ -33,6 +33,8 @@ readonly C_DIM=$'\033[0;90m'
 CURRENT_STEP=0
 # Wird gesetzt, sobald ein Release-Branch existiert - die Fehlerbehandlung erwaehnt ihn dann.
 RELEASE_BRANCH=""
+DEVELOP=""
+MAIN=""
 
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -44,13 +46,28 @@ note()      { printf '    %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
 
 # Bricht mit einer Zustandsbeschreibung ab: Wichtiger als die Fehlerursache ist, in welchem
 # Zustand das Repository jetzt ist und was von Hand nachzuholen bleibt.
+# Fuehrt einen Befehl aus und haelt dessen Ausgabe zurueck - aber nur, solange er gelingt.
+# Scheitert er, wird alles gezeigt, was er gesagt hat. Die Ausgabe stumm wegzuwerfen hat beim
+# ersten echten Release genau das verdeckt, worauf es ankam (siehe Kommentar bei Schritt 5).
+LAST_OUTPUT=""
+run() {
+    LAST_OUTPUT="$("$@" 2>&1)" && return 0
+    local status=$?
+    return ${status}
+}
+
 fail() {
     printf '%s❌%s\n' "${C_FAIL}" "${C_RESET}"
     printf '\n%sFehler: %s%s\n' "${C_FAIL}" "$*" "${C_RESET}" >&2
+    if [[ -n "${LAST_OUTPUT}" ]]; then
+        printf '\n%sAusgabe des fehlgeschlagenen Befehls:%s\n' "${C_DIM}" "${C_RESET}" >&2
+        printf '%s\n' "${LAST_OUTPUT}" | sed 's/^/    /' >&2
+    fi
     if [[ -n "${RELEASE_BRANCH}" ]] && git -C "${ROOT_DIR}" rev-parse --verify --quiet "${RELEASE_BRANCH}" >/dev/null; then
         printf '\n%sDer Release-Branch %s existiert noch und wurde nicht abgeschlossen.\n' "${C_DIM}" "${RELEASE_BRANCH}" >&2
         printf 'Aktueller Branch: %s\n' "$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)" >&2
-        printf 'Aufraeumen z. B. mit: git flow release delete -f %s%s\n' "${RELEASE_BRANCH#release/}" "${C_RESET}" >&2
+        printf 'Aufraeumen z. B. mit: git checkout %s && git branch -D %s%s\n' \
+            "${DEVELOP:-develop}" "${RELEASE_BRANCH}" "${C_RESET}" >&2
     fi
     exit 1
 }
@@ -90,7 +107,7 @@ set_version() {
             -DnewVersion="${target}" \
             -DgenerateBackupPoms=false \
             -DprocessAllModules=true ) >"${output}" 2>&1; then
-        cat "${output}" >&2
+        LAST_OUTPUT="$(cat "${output}")"
         rm -f "${output}"
         return 1
     fi
@@ -138,14 +155,15 @@ git -C "${ROOT_DIR}" rev-parse --git-dir >/dev/null 2>&1 \
 
 command -v git >/dev/null 2>&1 || fail "git wird benoetigt, ist aber nicht installiert"
 
+# Beide Editionen sind recht: Das Skript kommt ohne Option aus, die nur eine von ihnen kennt.
 git flow version >/dev/null 2>&1 \
-    || fail "git flow ist nicht installiert (macOS: brew install git-flow-avh)"
+    || fail "git flow ist nicht installiert (macOS: brew install git-flow)"
 
 git -C "${ROOT_DIR}" config --get gitflow.branch.develop >/dev/null \
     || fail "git flow ist in diesem Repository nicht initialisiert (git flow init)"
 
-readonly DEVELOP="$(git -C "${ROOT_DIR}" config --get gitflow.branch.develop)"
-readonly MAIN="$(git -C "${ROOT_DIR}" config --get gitflow.branch.master)"
+DEVELOP="$(git -C "${ROOT_DIR}" config --get gitflow.branch.develop)"
+MAIN="$(git -C "${ROOT_DIR}" config --get gitflow.branch.master)"
 readonly BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
 
 [[ "${BRANCH}" == "${DEVELOP}" ]] \
@@ -168,7 +186,7 @@ note "${DEVELOP} → ${MAIN}, aktuelle Version: $(project_version)"
 # --- [2/8] Release-Branch -----------------------------------------------------------------------
 
 step "Release-Branch release/${VERSION} erstellen"
-git -C "${ROOT_DIR}" flow release start "${VERSION}" >/dev/null 2>&1 \
+run git -C "${ROOT_DIR}" flow release start "${VERSION}" \
     || fail "git flow release start ${VERSION} ist fehlgeschlagen"
 RELEASE_BRANCH="release/${VERSION}"
 step_ok
@@ -182,26 +200,46 @@ step_ok
 # --- [4/8] Commit -------------------------------------------------------------------------------
 
 step "Versions-Bump committen"
-git -C "${ROOT_DIR}" add pom.xml || fail "git add pom.xml ist fehlgeschlagen"
-git -C "${ROOT_DIR}" commit -m "Version ${VERSION}" >/dev/null \
-    || fail "Der Commit des Versions-Bumps ist fehlgeschlagen"
-step_ok
+run git -C "${ROOT_DIR}" add pom.xml || fail "git add pom.xml ist fehlgeschlagen"
+# Stand die Version bereits auf dem Zielwert, hat Schritt 3 nichts geaendert und es gibt nichts zu
+# committen. "git commit" scheitert dann - das ist hier aber kein Fehler, sondern der Normalfall
+# eines zweiten Anlaufs oder eines von Hand vorgezogenen Bumps.
+if git -C "${ROOT_DIR}" diff --cached --quiet; then
+    step_ok
+    note "pom.xml stand bereits auf ${VERSION} - kein Commit noetig"
+else
+    run git -C "${ROOT_DIR}" commit -m "Version ${VERSION}" \
+        || fail "Der Commit des Versions-Bumps ist fehlgeschlagen"
+    step_ok
+fi
 
 # --- [5/8] Release abschliessen -----------------------------------------------------------------
 
 step "Release abschliessen (merge nach ${MAIN} und ${DEVELOP}, Tag setzen)"
-# -m setzt die Tag-Nachricht direkt, damit kein Editor aufgeht und der Lauf nicht haengt.
-git -C "${ROOT_DIR}" flow release finish -m "Release ${VERSION}" "${VERSION}" >/dev/null 2>&1 \
+
+# Der Tag wird bewusst NICHT von git flow gesetzt (-n), sondern gleich danach von Hand.
+#
+# Grund: git flow gibt Optionen ueber shFlags an getopt weiter, und das BSD-getopt von macOS
+# kann keinen Optionswert mit Leerzeichen. Ein "-m 'Release 1.0.0'" bricht deshalb mit
+# "flags:FATAL the available getopt does not support spaces in options" ab - ohne -m wiederum
+# oeffnet git flow einen Editor und der Lauf haengt. Die AVH-Edition kennt als Ausweg
+# "--messagefile", das alte nvie-git-flow (0.4.1, was Homebrew unter "git-flow" liefert) nicht.
+# Mit -n bleibt die einzige Option ein Schalter ohne Wert - das funktioniert in beiden Editionen,
+# und "git tag -a" nimmt die Nachricht ohne Umweg ueber getopt entgegen.
+run git -C "${ROOT_DIR}" flow release finish -n "${VERSION}" \
     || fail "git flow release finish ${VERSION} ist fehlgeschlagen (Merge-Konflikt?)"
 RELEASE_BRANCH=""
+
+run git -C "${ROOT_DIR}" tag -a "${TAG_PREFIX}${VERSION}" -m "Release ${VERSION}" "${MAIN}" \
+    || fail "Der Tag ${TAG_PREFIX}${VERSION} konnte nicht gesetzt werden"
 step_ok
 
 # --- [6/8] main pushen --------------------------------------------------------------------------
 
 step "${MAIN} samt Tag pushen"
-git -C "${ROOT_DIR}" push origin "${MAIN}" >/dev/null 2>&1 \
+run git -C "${ROOT_DIR}" push origin "${MAIN}" \
     || fail "Der Push von ${MAIN} ist fehlgeschlagen - der Release liegt lokal bereits vollstaendig vor"
-git -C "${ROOT_DIR}" push origin "${TAG_PREFIX}${VERSION}" >/dev/null 2>&1 \
+run git -C "${ROOT_DIR}" push origin "${TAG_PREFIX}${VERSION}" \
     || fail "Der Push des Tags ${TAG_PREFIX}${VERSION} ist fehlgeschlagen"
 step_ok
 
@@ -212,18 +250,23 @@ step_ok
 readonly NEXT_VERSION="$(awk -F. '{ printf "%s.%s.%s-SNAPSHOT", $1, $2, $3 + 1 }' <<<"${VERSION}")"
 
 step "${DEVELOP} auf ${NEXT_VERSION} setzen"
-git -C "${ROOT_DIR}" checkout "${DEVELOP}" >/dev/null 2>&1 \
+run git -C "${ROOT_DIR}" checkout "${DEVELOP}" \
     || fail "Wechsel auf ${DEVELOP} fehlgeschlagen"
 set_version "${NEXT_VERSION}" || fail "Die Version konnte nicht auf ${NEXT_VERSION} gesetzt werden"
-git -C "${ROOT_DIR}" add pom.xml
-git -C "${ROOT_DIR}" commit -m "Entwicklung an ${NEXT_VERSION} fortsetzen" >/dev/null \
-    || fail "Der Commit der Entwicklungsversion ist fehlgeschlagen"
-step_ok
+run git -C "${ROOT_DIR}" add pom.xml || fail "git add pom.xml ist fehlgeschlagen"
+if git -C "${ROOT_DIR}" diff --cached --quiet; then
+    step_ok
+    note "pom.xml stand bereits auf ${NEXT_VERSION} - kein Commit noetig"
+else
+    run git -C "${ROOT_DIR}" commit -m "Entwicklung an ${NEXT_VERSION} fortsetzen" \
+        || fail "Der Commit der Entwicklungsversion ist fehlgeschlagen"
+    step_ok
+fi
 
 # --- [8/8] develop pushen -----------------------------------------------------------------------
 
 step "${DEVELOP} pushen"
-git -C "${ROOT_DIR}" push origin "${DEVELOP}" >/dev/null 2>&1 \
+run git -C "${ROOT_DIR}" push origin "${DEVELOP}" \
     || fail "Der Push von ${DEVELOP} ist fehlgeschlagen"
 step_ok
 
