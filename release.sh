@@ -139,7 +139,6 @@ fi
 [[ $# -eq 1 ]] || fail "Es wird genau ein Argument erwartet: die neue Version"
 
 readonly VERSION="$1"
-readonly TAG_PREFIX="$(git -C "${ROOT_DIR}" config --get gitflow.prefix.versiontag || true)"
 
 printf '\n%sRelease %s%s\n\n' "${C_STEP}" "${VERSION}" "${C_RESET}"
 
@@ -155,16 +154,31 @@ git -C "${ROOT_DIR}" rev-parse --git-dir >/dev/null 2>&1 \
 
 command -v git >/dev/null 2>&1 || fail "git wird benoetigt, ist aber nicht installiert"
 
-# Beide Editionen sind recht: Das Skript kommt ohne Option aus, die nur eine von ihnen kennt.
+# Verlangt git-flow-next. Das alte nvie-git-flow (0.4.1, in Homebrew als "git-flow" und dort seit
+# 2026 deprecated) taugt hier nicht: Es reicht seine Optionen ueber shFlags an getopt weiter, und
+# das BSD-getopt von macOS kann keinen Optionswert mit Leerzeichen - die Tag-Nachricht unten
+# braechte es mit "flags:FATAL the available getopt does not support spaces in options" zu Fall.
 git flow version >/dev/null 2>&1 \
-    || fail "git flow ist nicht installiert (macOS: brew install git-flow)"
+    || fail "git flow ist nicht installiert (brew install git-flow-next)"
 
-git -C "${ROOT_DIR}" config --get gitflow.branch.develop >/dev/null \
-    || fail "git flow ist in diesem Repository nicht initialisiert (git flow init)"
+git flow version 2>/dev/null | grep -q 'git-flow-next' \
+    || fail "Es wird git-flow-next gebraucht, installiert ist '$(git flow version 2>&1 | head -1)'.
+       Wechseln mit: brew uninstall git-flow && brew install git-flow-next"
 
-DEVELOP="$(git -C "${ROOT_DIR}" config --get gitflow.branch.develop)"
-MAIN="$(git -C "${ROOT_DIR}" config --get gitflow.branch.master)"
+[[ "$(git -C "${ROOT_DIR}" config --get gitflow.initialized || true)" == "true" ]] \
+    || fail "git flow ist in diesem Repository nicht initialisiert (git flow init -d)"
+
+# git-flow-next legt die Zweignamen nicht als feste Schluessel ab, sondern beschreibt jeden Zweig
+# ueber seine Rolle. Die Angaben zum Release-Zweig nennen beides, was hier gebraucht wird: woher
+# er kommt (startpoint = develop) und wohin er muendet (parent = main). Damit funktioniert das
+# Skript auch, wenn die Zweige einmal anders heissen sollten.
+DEVELOP="$(git -C "${ROOT_DIR}" config --get gitflow.branch.release.startpoint || true)"
+MAIN="$(git -C "${ROOT_DIR}" config --get gitflow.branch.release.parent || true)"
+readonly RELEASE_PREFIX="$(git -C "${ROOT_DIR}" config --get gitflow.branch.release.prefix || true)"
 readonly BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
+
+[[ -n "${DEVELOP}" && -n "${MAIN}" ]] \
+    || fail "Die git-flow-Konfiguration nennt keinen Release-Zweig (git flow init -d)"
 
 [[ "${BRANCH}" == "${DEVELOP}" ]] \
     || fail "Ein Release startet auf '${DEVELOP}', aktueller Branch ist aber '${BRANCH}'"
@@ -172,11 +186,11 @@ readonly BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
 git -C "${ROOT_DIR}" diff --quiet && git -C "${ROOT_DIR}" diff --cached --quiet \
     || fail "Das Arbeitsverzeichnis ist nicht sauber - bitte erst committen oder verwerfen"
 
-git -C "${ROOT_DIR}" rev-parse --verify --quiet "refs/tags/${TAG_PREFIX}${VERSION}" >/dev/null \
-    && fail "Der Tag '${TAG_PREFIX}${VERSION}' existiert bereits - diese Version wurde schon veroeffentlicht"
+git -C "${ROOT_DIR}" rev-parse --verify --quiet "refs/tags/${VERSION}" >/dev/null \
+    && fail "Der Tag '${VERSION}' existiert bereits - diese Version wurde schon veroeffentlicht"
 
-git -C "${ROOT_DIR}" rev-parse --verify --quiet "release/${VERSION}" >/dev/null \
-    && fail "Der Branch 'release/${VERSION}' existiert bereits - ein frueherer Lauf wurde nicht abgeschlossen"
+git -C "${ROOT_DIR}" rev-parse --verify --quiet "${RELEASE_PREFIX}${VERSION}" >/dev/null \
+    && fail "Der Branch '${RELEASE_PREFIX}${VERSION}' existiert bereits - ein frueherer Lauf wurde nicht abgeschlossen"
 
 [[ -x "${ROOT_DIR}/mvnw" ]] || fail "mvnw fehlt oder ist nicht ausfuehrbar"
 
@@ -185,10 +199,10 @@ note "${DEVELOP} → ${MAIN}, aktuelle Version: $(project_version)"
 
 # --- [2/8] Release-Branch -----------------------------------------------------------------------
 
-step "Release-Branch release/${VERSION} erstellen"
+step "Release-Branch ${RELEASE_PREFIX}${VERSION} erstellen"
 run git -C "${ROOT_DIR}" flow release start "${VERSION}" \
     || fail "git flow release start ${VERSION} ist fehlgeschlagen"
-RELEASE_BRANCH="release/${VERSION}"
+RELEASE_BRANCH="${RELEASE_PREFIX}${VERSION}"
 step_ok
 
 # --- [3/8] Versions-Bump ------------------------------------------------------------------------
@@ -216,22 +230,13 @@ fi
 # --- [5/8] Release abschliessen -----------------------------------------------------------------
 
 step "Release abschliessen (merge nach ${MAIN} und ${DEVELOP}, Tag setzen)"
-
-# Der Tag wird bewusst NICHT von git flow gesetzt (-n), sondern gleich danach von Hand.
-#
-# Grund: git flow gibt Optionen ueber shFlags an getopt weiter, und das BSD-getopt von macOS
-# kann keinen Optionswert mit Leerzeichen. Ein "-m 'Release 1.0.0'" bricht deshalb mit
-# "flags:FATAL the available getopt does not support spaces in options" ab - ohne -m wiederum
-# oeffnet git flow einen Editor und der Lauf haengt. Die AVH-Edition kennt als Ausweg
-# "--messagefile", das alte nvie-git-flow (0.4.1, was Homebrew unter "git-flow" liefert) nicht.
-# Mit -n bleibt die einzige Option ein Schalter ohne Wert - das funktioniert in beiden Editionen,
-# und "git tag -a" nimmt die Nachricht ohne Umweg ueber getopt entgegen.
-run git -C "${ROOT_DIR}" flow release finish -n "${VERSION}" \
+# Merge, Tag und das Aufraeumen des Release-Branches macht git flow selbst - dafuer ist es da.
+# -m setzt die Tag-Nachricht mit, damit kein Editor aufgeht und der Lauf nicht haengt.
+# --no-push, weil die Pushes bewusst als eigene Schritte folgen: So sagt die Schrittanzeige, was
+# gerade passiert, und ein gescheiterter Push ist von einem gescheiterten Merge unterscheidbar.
+run git -C "${ROOT_DIR}" flow release finish -m "Release ${VERSION}" --no-push "${VERSION}" \
     || fail "git flow release finish ${VERSION} ist fehlgeschlagen (Merge-Konflikt?)"
 RELEASE_BRANCH=""
-
-run git -C "${ROOT_DIR}" tag -a "${TAG_PREFIX}${VERSION}" -m "Release ${VERSION}" "${MAIN}" \
-    || fail "Der Tag ${TAG_PREFIX}${VERSION} konnte nicht gesetzt werden"
 step_ok
 
 # --- [6/8] main pushen --------------------------------------------------------------------------
@@ -239,8 +244,8 @@ step_ok
 step "${MAIN} samt Tag pushen"
 run git -C "${ROOT_DIR}" push origin "${MAIN}" \
     || fail "Der Push von ${MAIN} ist fehlgeschlagen - der Release liegt lokal bereits vollstaendig vor"
-run git -C "${ROOT_DIR}" push origin "${TAG_PREFIX}${VERSION}" \
-    || fail "Der Push des Tags ${TAG_PREFIX}${VERSION} ist fehlgeschlagen"
+run git -C "${ROOT_DIR}" push origin "${VERSION}" \
+    || fail "Der Push des Tags ${VERSION} ist fehlgeschlagen"
 step_ok
 
 # --- [7/8] develop hochziehen -------------------------------------------------------------------
@@ -271,4 +276,4 @@ run git -C "${ROOT_DIR}" push origin "${DEVELOP}" \
 step_ok
 
 printf '\n%s✅ Release %s ist veroeffentlicht.%s\n' "${C_OK}" "${VERSION}" "${C_RESET}"
-note "Tag ${TAG_PREFIX}${VERSION} auf ${MAIN}, ${DEVELOP} steht auf ${NEXT_VERSION}."
+note "Tag ${VERSION} auf ${MAIN}, ${DEVELOP} steht auf ${NEXT_VERSION}."
