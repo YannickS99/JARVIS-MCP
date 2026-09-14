@@ -32,6 +32,8 @@ public final class StubHomeAssistant implements AutoCloseable {
     private volatile String statesBody;
     /** Antwort auf /api/template - das Rendern selbst bildet der Stub nicht nach. */
     private volatile String templateBody = "[[],[]]";
+    /** Antwort auf das Lichtzustands-Template - erkannt am Wort "states.light" im Request. */
+    private volatile String lightsBody = "[]";
     private volatile int templateStatus = 200;
     private volatile int statesStatus = 200;
     private volatile int serviceStatus = 200;
@@ -80,12 +82,33 @@ public final class StubHomeAssistant implements AutoCloseable {
         this.templateStatus = status;
     }
 
+    /**
+     * Zwei Templates gehen ueber denselben Endpunkt - der Stub rendert nicht, er unterscheidet nur,
+     * welches der beiden gefragt war, und gibt die passende vorbereitete Antwort.
+     */
     private void handleTemplate(HttpExchange exchange) throws IOException {
         templateRequests.incrementAndGet();
+        String requested;
         try (InputStream in = exchange.getRequestBody()) {
-            in.readAllBytes();
+            requested = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
-        respond(exchange, templateStatus, templateStatus == 200 ? templateBody : "unauthorized");
+        if (templateStatus != 200) {
+            respond(exchange, templateStatus, "unauthorized");
+            return;
+        }
+        respond(exchange, 200, requested.contains("states.light") ? lightsBody : templateBody);
+    }
+
+    /** Lichter, die das Zustands-Template liefern soll - Zeilen aus {@link #light}. */
+    public void lights(String... rows) {
+        this.lightsBody = "[" + String.join(",", rows) + "]";
+    }
+
+    /** Eine Zeile des Zustands-Templates: {@code [entity_id, name, state, area_id, area_name]}. */
+    public static String light(String entityId, String name, String state, String areaId,
+            String areaName) {
+        return "[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]"
+                .formatted(entityId, name, state, areaId, areaName);
     }
 
     public int templateRequests() {
