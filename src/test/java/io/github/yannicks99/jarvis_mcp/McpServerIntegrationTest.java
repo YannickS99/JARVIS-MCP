@@ -58,6 +58,10 @@ class McpServerIntegrationTest {
                 StubHomeAssistant.entity("script.gute_nacht", "Gute Nacht")));
         // Die Bereiche kommen aus Home Assistant - "Arbeitszimmer" steht in keiner Konfiguration.
         homeAssistant.areas("wohnzimmer", "Wohnzimmer", "arbeitszimmer", "Arbeitszimmer");
+        homeAssistant.lights(
+                StubHomeAssistant.light("light.stehlampe", "Stehlampe", "on", "wohnzimmer", "Wohnzimmer"),
+                StubHomeAssistant.light("light.buero_decke", "Bürolicht", "off",
+                        "arbeitszimmer", "Arbeitszimmer"));
     }
 
     @AfterAll
@@ -110,13 +114,14 @@ class McpServerIntegrationTest {
     }
 
     @Test
-    @DisplayName("die drei Home-Assistant-Werkzeuge stehen mit ihren Parametern bereit")
+    @DisplayName("die fuenf Home-Assistant-Werkzeuge stehen mit ihren Parametern bereit")
     void listsTools() {
         client = connect("geheim");
         List<McpSchema.Tool> tools = client.listTools().tools();
 
         assertThat(tools).extracting(McpSchema.Tool::name)
-                .containsExactlyInAnyOrder("set_area_lights_power", "set_light_power", "run_ha_routine");
+                .containsExactlyInAnyOrder("set_area_lights_power", "set_light_power", "run_ha_routine",
+                        "get_lights_status", "get_light_status");
 
         McpSchema.Tool areaTool = tools.stream()
                 .filter(tool -> tool.name().equals("set_area_lights_power"))
@@ -128,6 +133,66 @@ class McpServerIntegrationTest {
                 .containsOnlyKeys("area", "power");
         assertThat(areaTool.inputSchema()).extracting("required", InstanceOfAssertFactories.LIST)
                 .containsExactlyInAnyOrder("area", "power");
+
+        // Beim Status ist der Bereich optional - sonst kann die KI nicht nach dem ganzen Haus
+        // fragen, ohne sich einen Bereich auszudenken.
+        McpSchema.Tool statusTool = tools.stream()
+                .filter(tool -> tool.name().equals("get_lights_status"))
+                .findFirst().orElseThrow();
+        assertThat(statusTool.inputSchema()).extracting("properties", InstanceOfAssertFactories.MAP)
+                .containsOnlyKeys("area");
+        assertThat(statusTool.inputSchema()).extracting("required", InstanceOfAssertFactories.LIST)
+                .doesNotContain("area");
+    }
+
+    @Test
+    @DisplayName("ohne Bereich kommt der Status des ganzen Hauses")
+    void reportsStatusForWholeHouse() {
+        client = connect("geheim");
+
+        McpSchema.CallToolResult result = call("get_lights_status", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result))
+                .contains("Wohnzimmer: Stehlampe")
+                .contains("Ganz aus ist der Bereich Arbeitszimmer");
+        // Eine Statusfrage schaltet nichts.
+        assertThat(homeAssistant.calls()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("mit Bereich beschraenkt sich der Status auf diesen - auch ueber einen Alias")
+    void reportsStatusForArea() {
+        client = connect("geheim");
+
+        McpSchema.CallToolResult result = call("get_lights_status", Map.of("area", "büro"));
+
+        assertThat(text(result))
+                .contains("Arbeitszimmer")
+                .contains("kein Licht an")
+                .doesNotContain("Stehlampe");
+    }
+
+    @Test
+    @DisplayName("ein einzelnes Licht wird auch fuer die Statusfrage ueber seinen Namen aufgeloest")
+    void reportsStatusForSingleLight() {
+        client = connect("geheim");
+
+        assertThat(text(call("get_light_status", Map.of("light", "bürolicht"))))
+                .isEqualTo("Das Licht 'Bürolicht' im Bereich 'Arbeitszimmer' ist aus.");
+        assertThat(text(call("get_light_status", Map.of("light", "Stehlampe"))))
+                .isEqualTo("Das Licht 'Stehlampe' im Bereich 'Wohnzimmer' ist an.");
+    }
+
+    @Test
+    @DisplayName("ein unbekanntes Licht fuehrt auch beim Status zu Vorschlaegen statt zu einem Fehler")
+    void unknownLightIsAnswerableOnStatus() {
+        client = connect("geheim");
+
+        McpSchema.CallToolResult result = call("get_light_status", Map.of("light", "Gartenlicht"));
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result)).contains("Gartenlicht").contains("Stehlampe");
     }
 
     @Test

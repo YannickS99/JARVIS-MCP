@@ -35,8 +35,8 @@ spring:
         request-timeout: 20s
         instructions: >
           Werkzeuge fuer das Zuhause von JARVIS. Ueber sie lassen sich Lichter einzeln oder
-          raumweise schalten und in Home Assistant hinterlegte Routinen (Szenen und Skripte)
-          ausloesen.
+          raumweise schalten, in Home Assistant hinterlegte Routinen (Szenen und Skripte)
+          ausloesen und abfragen, welche Lichter gerade an sind.
 
 server:
   port: ${SERVER_PORT:8098}

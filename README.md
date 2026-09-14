@@ -12,13 +12,15 @@ behält seine REST-API. JARVIS-MCP übersetzt lediglich zwischen ihnen und dem S
 LLM → MCP-Werkzeug set_light_power → JARVIS-MCP → Home-Assistant-REST-API → Home Assistant
 ```
 
-## Werkzeuge (v1)
+## Werkzeuge
 
 | Werkzeug | Parameter | Wirkung |
 |---|---|---|
 | `set_area_lights_power` | `area`, `power` | Schaltet alle Lichter eines Bereichs an/aus |
 | `set_light_power` | `light`, `power` | Schaltet ein einzelnes Licht über seinen Anzeigenamen |
 | `run_ha_routine` | `name` | Löst eine Home-Assistant-Szene oder ein -Skript aus |
+| `get_lights_status` | `area` (optional) | Sagt, welche Lichter gerade an sind — im ganzen Haus oder in einem Bereich |
+| `get_light_status` | `light` | Sagt, ob ein einzelnes Licht an oder aus ist |
 
 `power` nimmt `on` bzw. `off` entgegen (und ein paar naheliegende Varianten wie `an`/`aus`).
 Namen werden unabhängig von Groß-/Kleinschreibung und Umlautschreibweise erkannt: `Büro`,
@@ -26,6 +28,14 @@ Namen werden unabhängig von Groß-/Kleinschreibung und Umlautschreibweise erkan
 Home Assistant** — es gibt nichts doppelt zu pflegen. Ist ein Name nicht eindeutig oder unbekannt, kommt
 eine Antwort mit den möglichen Namen zurück statt eines Protokollfehlers — das Modell kann es
 damit gleich noch einmal richtig versuchen.
+
+Die beiden Status-Werkzeuge fragen Home Assistant **bei jedem Aufruf frisch** — anders als die
+Namensauflösung, die aus einem warmgehaltenen Index kommt. Ein zwischengespeicherter Schaltzustand
+wäre schlicht falsch, sobald jemand einen Schalter drückt. Geholt wird er über dieselbe
+Template-Engine wie die Bereiche (`POST /api/template`), weil nur sie die Bereichszuordnung einer
+Entität herausgibt und die Antwort dabei ein paar hundert Byte groß ist statt der mehreren hundert
+Kilobyte von `/api/states`. Ein Licht, das Home Assistant als `unavailable` meldet, wird eigens
+genannt statt stillschweigend als „aus" gezählt.
 
 Neue „Protokolle" entstehen rein in Home Assistant: Wer dort eine Szene oder ein Skript anlegt,
 kann es sofort über `run_ha_routine` ansprechen — an JARVIS-MCP ist dafür nichts zu ändern.

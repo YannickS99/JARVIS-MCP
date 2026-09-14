@@ -18,6 +18,25 @@ import tools.jackson.databind.ObjectMapper;
  */
 public class HomeAssistantClient {
 
+    /**
+     * Liefert je Licht eine Zeile {@code [entity_id, name, state, area_id, area_name]}.
+     *
+     * <p>{@code to_json} uebernimmt das Maskieren, {@code or ''} faengt die Lichter ab, die keinem
+     * Bereich zugeordnet sind - sonst stuende dort {@code null} und die Zerlegung muesste es
+     * gesondert behandeln.
+     */
+    private static final String LIGHT_STATES_TEMPLATE = """
+            {%- set found = namespace(rows=[]) -%}
+            {%- for light in states.light -%}
+            {%- set found.rows = found.rows
+                + [[light.entity_id, light.name, light.state,
+                    area_id(light.entity_id) or '', area_name(light.entity_id) or '']] -%}
+            {%- endfor -%}
+            {{ found.rows | to_json }}
+            """;
+
+    private static final int LIGHT_STATE_COLUMNS = 5;
+
     private final RestClient restClient;
     private final ObjectMapper jsonMapper;
 
@@ -68,7 +87,28 @@ public class HomeAssistantClient {
     public List<HomeAssistantArea> areas() {
         String template = "{{ [areas(), areas() | map('area_name') | list] | to_json }}";
 
-        String rendered = restClient.post()
+        return parseAreas(renderTemplate(template));
+    }
+
+    /**
+     * Liest den aktuellen Zustand aller Lichter samt Bereichszuordnung.
+     *
+     * <p>Wieder ueber die Template-Engine, und zwar aus zwei Gruenden: Erstens steht die
+     * Bereichszuordnung einer Entitaet in keiner REST-Antwort - {@code GET /api/states} kennt sie
+     * nicht, die Registry hat keinen Endpunkt. Zweitens kommt so ein Aufruf mit ein paar hundert
+     * Byte zurueck statt mit den mehreren hundert Kilobyte, die {@code /api/states} fuer eine
+     * einzige Frage nach dem Lichtzustand liefern wuerde.
+     *
+     * <p>Anders als der Entitaeten-Index wird hier nichts zwischengespeichert: Ein Zustand ist nur
+     * so lange richtig, bis jemand einen Schalter drueckt.
+     */
+    public List<HomeAssistantLightStatus> lightStates() {
+        return parseLightStates(renderTemplate(LIGHT_STATES_TEMPLATE));
+    }
+
+    /** Schickt ein Jinja-Template an Home Assistant und gibt das Ergebnis unveraendert zurueck. */
+    private String renderTemplate(String template) {
+        return restClient.post()
                 .uri("/api/template")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_PLAIN)
@@ -81,8 +121,27 @@ public class HomeAssistantClient {
                     }
                     return new String(response.getBody().readAllBytes(), StandardCharsets.UTF_8);
                 });
+    }
 
-        return parseAreas(rendered);
+    /** Erwartet eine Zeile je Licht: {@code [entity_id, name, state, area_id, area_name]}. */
+    private List<HomeAssistantLightStatus> parseLightStates(String rendered) {
+        List<List<String>> rows;
+        try {
+            rows = jsonMapper.readValue(rendered, new TypeReference<List<List<String>>>() { });
+        } catch (RuntimeException ex) {
+            throw new HomeAssistantException(
+                    "Unerwartete Antwort auf /api/template: " + rendered.strip(), ex);
+        }
+
+        List<HomeAssistantLightStatus> lights = new ArrayList<>(rows.size());
+        for (List<String> row : rows) {
+            if (row.size() != LIGHT_STATE_COLUMNS) {
+                throw new HomeAssistantException("Unerwartete Antwort auf /api/template: " + rendered.strip());
+            }
+            lights.add(new HomeAssistantLightStatus(row.get(0), row.get(1), row.get(2),
+                    row.get(3), row.get(4)));
+        }
+        return lights;
     }
 
     /** Erwartet {@code [["id1","id2"],["Name 1","Name 2"]]} - so baut es das Template oben. */

@@ -46,6 +46,7 @@ CURRENT_STEP=0
 RELEASE_BRANCH=""
 DEVELOP=""
 MAIN=""
+REMOTE=""
 
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -208,7 +209,10 @@ git flow version 2>/dev/null | grep -q 'git-flow-next' \
 # initialisiert. `git flow init -d` ergaenzt das neue Schema, laesst das alte unangetastet und
 # aendert nichts an der Nutzung in SourceTree.
 [[ "$(git -C "${ROOT_DIR}" config --get gitflow.initialized || true)" == "true" ]] \
-    || fail "git flow ist in diesem Repository nicht initialisiert (git flow init -d)"
+    || fail "git flow ist in diesem Repository nicht initialisiert.
+       Nachholen mit (Hauptzweig ausdruecklich angeben, sonst legt git-flow-next einen neuen an):
+
+           git flow init -d -f -m main -e develop"
 
 # git-flow-next legt die Zweignamen nicht als feste Schluessel ab, sondern beschreibt jeden Zweig
 # ueber seine Rolle. Die Angaben zum Release-Zweig nennen beides, was hier gebraucht wird: woher
@@ -220,7 +224,31 @@ readonly RELEASE_PREFIX="$(git -C "${ROOT_DIR}" config --get gitflow.branch.rele
 readonly BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
 
 [[ -n "${DEVELOP}" && -n "${MAIN}" ]] \
-    || fail "Die git-flow-Konfiguration nennt keinen Release-Zweig (git flow init -d)"
+    || fail "Die git-flow-Konfiguration nennt keinen Release-Zweig.
+       Nachholen mit: git flow init -d -f -m main -e develop"
+
+# Der Fernname wird nicht vorausgesetzt, sondern nachgesehen: Hier heisst er zwar "origin", bei
+# den Schwesterprojekten aber JARVIS-Pilot bzw. MonitoringTool. Fest verdrahtet waere der Lauf
+# dort erst in Schritt 9 gescheitert - also genau dann, wenn Merge und Tag lokal schon stehen,
+# und damit im halb freigegebenen Zustand, den der ganze Ablauf vermeiden soll. Die beiden
+# Pruefungen weiter unten waeren bis dahin stillschweigend wirkungslos geblieben.
+REMOTE="$(git -C "${ROOT_DIR}" config --get "branch.${DEVELOP}.remote" || true)"
+if [[ -z "${REMOTE}" ]]; then
+    if [[ "$(git -C "${ROOT_DIR}" remote | wc -l | tr -d ' ')" == "1" ]]; then
+        REMOTE="$(git -C "${ROOT_DIR}" remote)"
+    else
+        fail "Der Fernname laesst sich nicht bestimmen: '${DEVELOP}' hat keinen Upstream, und es
+       gibt nicht genau ein Remote. Upstream setzen mit:
+
+           git branch --set-upstream-to=<remote>/${DEVELOP} ${DEVELOP}"
+    fi
+fi
+
+# Ohne diesen Fernzweig koennte die Vorauslauf-Pruefung unten nichts feststellen - sie saehe wie
+# eine Pruefung aus und waere keine.
+git -C "${ROOT_DIR}" rev-parse --verify --quiet "${REMOTE}/${MAIN}" >/dev/null \
+    || fail "'${REMOTE}/${MAIN}' ist nicht bekannt - ohne diesen Fernzweig laesst sich nicht
+       pruefen, ob '${MAIN}' lokal vorauslaeuft. Holen mit: git fetch ${REMOTE}"
 
 [[ "${BRANCH}" == "${DEVELOP}" ]] \
     || fail "Ein Release startet auf '${DEVELOP}', aktueller Branch ist aber '${BRANCH}'"
@@ -228,20 +256,20 @@ readonly BRANCH="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD)"
 git -C "${ROOT_DIR}" diff --quiet && git -C "${ROOT_DIR}" diff --cached --quiet \
     || fail "Das Arbeitsverzeichnis ist nicht sauber - bitte erst committen oder verwerfen"
 
-# Ein lokal vorhandener Tag heisst zweierlei - je nachdem, ob er schon auf origin liegt. Nur im
+# Ein lokal vorhandener Tag heisst zweierlei - je nachdem, ob er schon auf dem Server liegt. Nur im
 # zweiten Fall ist die Version wirklich draussen; sonst ist ein frueherer Lauf steckengeblieben,
 # und der Ausweg ist ein anderer. Diesen Unterschied zu verschweigen war beim Abbruch von 1.1.0
 # das eigentliche Aergernis: Die Meldung behauptete, die Version sei veroeffentlicht.
 if git -C "${ROOT_DIR}" rev-parse --verify --quiet "refs/tags/${VERSION}" >/dev/null; then
-    if git -C "${ROOT_DIR}" ls-remote --exit-code --tags origin "${VERSION}" >/dev/null 2>&1; then
-        fail "Der Tag '${VERSION}' liegt bereits auf origin - diese Version ist veroeffentlicht"
+    if git -C "${ROOT_DIR}" ls-remote --exit-code --tags "${REMOTE}" "${VERSION}" >/dev/null 2>&1; then
+        fail "Der Tag '${VERSION}' liegt bereits auf ${REMOTE} - diese Version ist veroeffentlicht"
     fi
-    fail "Der Tag '${VERSION}' existiert lokal, aber nicht auf origin.
+    fail "Der Tag '${VERSION}' existiert lokal, aber nicht auf ${REMOTE}.
        Ein frueherer Lauf ist nach dem Merge nach ${MAIN} abgebrochen; gepusht wurde nichts.
        Diesen halben Stand zuruecknehmen und neu anfangen:
 
            git tag -d ${VERSION}
-           git branch -f ${MAIN} origin/${MAIN}
+           git branch -f ${MAIN} ${REMOTE}/${MAIN}
            git branch -D ${RELEASE_PREFIX}${VERSION}   # nur falls noch vorhanden
            git checkout ${DEVELOP}"
 fi
@@ -249,11 +277,11 @@ fi
 git -C "${ROOT_DIR}" rev-parse --verify --quiet "${RELEASE_PREFIX}${VERSION}" >/dev/null \
     && fail "Der Branch '${RELEASE_PREFIX}${VERSION}' existiert bereits - ein frueherer Lauf wurde nicht abgeschlossen"
 
-# Liegt main lokal vor origin, ohne dass ein Tag dazu existiert, stimmt etwas nicht - ein
+# Liegt main lokal vor dem Server, ohne dass ein Tag dazu existiert, stimmt etwas nicht - ein
 # Release wuerde darauf aufsetzen und den fremden Stand mitveroeffentlichen.
-if [[ -n "$(git -C "${ROOT_DIR}" log --oneline "origin/${MAIN}..${MAIN}" 2>/dev/null)" ]]; then
-    fail "'${MAIN}' ist lokal weiter als origin/${MAIN} - vermutlich Reste eines abgebrochenen Laufs.
-       Nachsehen mit: git log --oneline origin/${MAIN}..${MAIN}"
+if [[ -n "$(git -C "${ROOT_DIR}" log --oneline "${REMOTE}/${MAIN}..${MAIN}" 2>/dev/null)" ]]; then
+    fail "'${MAIN}' ist lokal weiter als ${REMOTE}/${MAIN} - vermutlich Reste eines abgebrochenen Laufs.
+       Nachsehen mit: git log --oneline ${REMOTE}/${MAIN}..${MAIN}"
 fi
 
 # Schritt 2 und 4 brauchen ihn beide. Hier zu scheitern kostet nichts, im Build waere es
@@ -261,7 +289,7 @@ fi
 [[ -x "${ROOT_DIR}/mvnw" ]] || fail "mvnw fehlt oder ist nicht ausfuehrbar"
 
 step_ok
-note "${DEVELOP} → ${MAIN}, aktuelle Version: $(project_version) (noch nichts veraendert)"
+note "${DEVELOP} → ${MAIN} auf ${REMOTE}, aktuelle Version: $(project_version) (noch nichts veraendert)"
 
 # --- [2/10] Build und Tests ---------------------------------------------------------------------
 
@@ -387,18 +415,18 @@ fi
 
 # Erst jetzt, wo lokal alles steht: Bis hierher war jeder Fehlschlag ein rein lokales Problem.
 step "${MAIN} samt Tag pushen"
-run git -C "${ROOT_DIR}" push origin "${MAIN}" \
+run git -C "${ROOT_DIR}" push "${REMOTE}" "${MAIN}" \
     || fail "Der Push von ${MAIN} ist fehlgeschlagen - der Release liegt lokal bereits vollstaendig vor"
-run git -C "${ROOT_DIR}" push origin "${VERSION}" \
+run git -C "${ROOT_DIR}" push "${REMOTE}" "${VERSION}" \
     || fail "Der Push des Tags ${VERSION} ist fehlgeschlagen"
 step_ok
 
 # --- [10/10] develop pushen ---------------------------------------------------------------------
 
 step "${DEVELOP} pushen"
-run git -C "${ROOT_DIR}" push origin "${DEVELOP}" \
+run git -C "${ROOT_DIR}" push "${REMOTE}" "${DEVELOP}" \
     || fail "Der Push von ${DEVELOP} ist fehlgeschlagen - ${MAIN} samt Tag ist bereits veroeffentlicht.
-       Nachholen mit: git push origin ${DEVELOP}"
+       Nachholen mit: git push ${REMOTE} ${DEVELOP}"
 step_ok
 
 printf '\n%s✅ Release %s ist veroeffentlicht.%s\n' "${C_OK}" "${VERSION}" "${C_RESET}"
