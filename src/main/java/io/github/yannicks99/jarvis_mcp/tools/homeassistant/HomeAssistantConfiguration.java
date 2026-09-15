@@ -31,30 +31,27 @@ public class HomeAssistantConfiguration {
     /** Nur diese Domains werden in den Index aufgenommen - alles andere braucht kein Werkzeug. */
     private static final List<String> INDEXED_DOMAINS = List.of("light.", "script.", "scene.");
 
-    /**
-     * Ein einziger HTTP-Client fuer alle Aufrufe: Er haelt die Verbindung zu Home Assistant offen,
-     * sodass nachfolgende Aufrufe weder TCP- noch TLS-Handshake erneut bezahlen. Genau das macht
-     * den Unterschied zwischen einer Lichtschaltung, die sofort sitzt, und einer, die man hoert.
-     */
     @Bean
-    HttpClient homeAssistantHttpClient(HomeAssistantProperties properties) {
-        return HttpClient.newBuilder()
-                .connectTimeout(properties.connectTimeout())
-                // Virtuelle Threads: Der Client braucht keinen eigenen Pool-Unterbau, und ein
-                // wartender Aufruf belegt keinen Betriebssystem-Thread.
-                .executor(Executors.newVirtualThreadPerTaskExecutor())
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+    HomeAssistantClient homeAssistantClient(HomeAssistantProperties properties, ObjectMapper jsonMapper) {
+        return new HomeAssistantClient(restClient(properties), jsonMapper);
     }
 
-    @Bean
-    RestClient homeAssistantRestClient(HttpClient httpClient, HomeAssistantProperties properties) {
+    /**
+     * Der HTTP-Unterbau dieses Moduls entsteht hier und wird bewusst <em>nicht</em> als Bean
+     * veroeffentlicht.
+     *
+     * <p>{@link HttpClient} und {@link RestClient} sind allgemeine Typen: Sobald ein zweites
+     * Tool-Modul eigene anlegt, gibt es zwei Beans desselben Typs, und jede Einspritzung nach Typ
+     * wird mehrdeutig - ein neues Modul wuerde also ein bestehendes brechen. Nach aussen gibt jedes
+     * Modul deshalb nur seine eigenen Typen ({@link HomeAssistantClient}, die Werkzeuge) heraus.
+     */
+    private static RestClient restClient(HomeAssistantProperties properties) {
         if (!properties.configured()) {
             log.warn("Home-Assistant-Modul ist aktiv, aber jarvis-mcp.home-assistant.base-url bzw. "
                     + ".token fehlen - die Werkzeuge werden bei jedem Aufruf scheitern.");
         }
 
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient(properties));
         requestFactory.setReadTimeout(properties.readTimeout());
 
         return RestClient.builder()
@@ -65,9 +62,19 @@ public class HomeAssistantConfiguration {
                 .build();
     }
 
-    @Bean
-    HomeAssistantClient homeAssistantClient(RestClient restClient, ObjectMapper jsonMapper) {
-        return new HomeAssistantClient(restClient, jsonMapper);
+    /**
+     * Ein einziger HTTP-Client fuer alle Aufrufe: Er haelt die Verbindung zu Home Assistant offen,
+     * sodass nachfolgende Aufrufe weder TCP- noch TLS-Handshake erneut bezahlen. Genau das macht den
+     * Unterschied zwischen einer Lichtschaltung, die sofort sitzt, und einer, die man hoert.
+     */
+    private static HttpClient httpClient(HomeAssistantProperties properties) {
+        return HttpClient.newBuilder()
+                .connectTimeout(properties.connectTimeout())
+                // Virtuelle Threads: Der Client braucht keinen eigenen Pool-Unterbau, und ein
+                // wartender Aufruf belegt keinen Betriebssystem-Thread.
+                .executor(Executors.newVirtualThreadPerTaskExecutor())
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
     }
 
     @Bean

@@ -36,7 +36,9 @@ spring:
         instructions: >
           Werkzeuge fuer das Zuhause von JARVIS. Ueber sie lassen sich Lichter einzeln oder
           raumweise schalten, in Home Assistant hinterlegte Routinen (Szenen und Skripte)
-          ausloesen und abfragen, welche Lichter gerade an sind.
+          ausloesen und abfragen, welche Lichter gerade an sind. Dazu kommen die Anwendungen
+          auf dem Server selbst: abfragen, wie es ihnen geht und ob etwas ausgefallen ist,
+          und sie unter ihrem Anwendungsnamen starten bzw. stoppen.
 
 server:
   port: ${SERVER_PORT:8098}
@@ -85,6 +87,20 @@ jarvis-mcp:
     # Bereichsaliasse gibt keine REST-Schnittstelle heraus. Gepflegt wird das im Betrieb ueber
     # config/application.yaml neben dem Jar.
     areas: []
+
+  monitoring:
+    enabled: ${MONITORING_ENABLED:true}
+    # Das Monitoring-Backend veroeffentlicht auf dem Host bewusst nur auf 127.0.0.1 - aus einem
+    # Bridge-Container ist es damit ueber host.docker.internal nicht erreichbar. JARVIS-MCP haengt
+    # sich stattdessen an das gemeinsame Netz jarvis-net (siehe docker-compose.yml) und spricht den
+    # Container direkt an. Eine Freigabe des Hostports waere die naheliegende, aber falsche
+    # Alternative: Sie wuerde auch /api/v1 ins Netz stellen, und das ist ungeschuetzt.
+    base-url: ${MONITORING_BASE_URL:http://monitoring-backend:8080}
+    # Geteiltes Geheimnis mit dem Monitoring Tool - dort MONITORING_INTEGRATION_TOKEN.
+    token: ${MONITORING_TOKEN:}
+    connect-timeout: ${MONITORING_CONNECT_TIMEOUT:2s}
+    # Groesser als bei Home Assistant: Ein Container-Start wartet auf die Docker Engine.
+    read-timeout: ${MONITORING_READ_TIMEOUT:10s}
 
 logging:
   level:
