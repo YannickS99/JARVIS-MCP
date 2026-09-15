@@ -1,5 +1,6 @@
 package io.github.yannicks99.jarvis_mcp.tools.homeassistant;
 
+import io.github.yannicks99.jarvis_mcp.common.Power;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -61,9 +62,9 @@ public class HomeAssistantTools {
             return unknownArea(area);
         }
 
-        client.callService("light", parsed.get().service(), Map.of("area_id", areaId.get()));
-        log.info("Lichter im Bereich {} ({}) {}", area, areaId.get(), parsed.get().participle());
-        return "Alle Lichter im Bereich '%s' wurden %s.".formatted(area, parsed.get().participle());
+        client.callService("light", service(parsed.get()), Map.of("area_id", areaId.get()));
+        log.info("Lichter im Bereich {} ({}) {}", area, areaId.get(), participle(parsed.get()));
+        return "Alle Lichter im Bereich '%s' wurden %s.".formatted(area, participle(parsed.get()));
     }
 
     @McpTool(name = "set_light_power",
@@ -86,9 +87,9 @@ public class HomeAssistantTools {
 
         return switch (index.find(light, LIGHTS)) {
             case EntityLookup.Found(HomeAssistantEntity entity) -> {
-                client.callService("light", parsed.get().service(), Map.of("entity_id", entity.entityId()));
-                log.info("Licht {} ({}) {}", entity.name(), entity.entityId(), parsed.get().participle());
-                yield "Das Licht '%s' wurde %s.".formatted(entity.name(), parsed.get().participle());
+                client.callService("light", service(parsed.get()), Map.of("entity_id", entity.entityId()));
+                log.info("Licht {} ({}) {}", entity.name(), entity.entityId(), participle(parsed.get()));
+                yield "Das Licht '%s' wurde %s.".formatted(entity.name(), participle(parsed.get()));
             }
             case EntityLookup.NotFound(List<String> available) -> unknownLight(light, available);
             case EntityLookup.Ambiguous(List<String> candidates) -> ambiguousLight(light, candidates);
@@ -211,6 +212,16 @@ public class HomeAssistantTools {
     private static String ambiguousLight(String light, List<String> candidates) {
         return "'%s' passt auf mehrere Lichter: %s. Bitte eines davon genau benennen."
                 .formatted(light, String.join(", ", candidates));
+    }
+
+    /** Der Name des Home-Assistant-Dienstes zu einem Schaltzustand. */
+    private static String service(Power power) {
+        return power == Power.ON ? "turn_on" : "turn_off";
+    }
+
+    /** Fuer die Rueckmeldung an die KI, z. B. "eingeschaltet". */
+    private static String participle(Power power) {
+        return power == Power.ON ? "eingeschaltet" : "ausgeschaltet";
     }
 
     private static String invalidPower(String power) {

@@ -9,10 +9,13 @@ Integrationslogik mitbringen muss.
 behält seine REST-API. JARVIS-MCP übersetzt lediglich zwischen ihnen und dem Sprachmodell.
 
 ```
-LLM → MCP-Werkzeug set_light_power → JARVIS-MCP → Home-Assistant-REST-API → Home Assistant
+LLM → MCP-Werkzeug set_light_power        → JARVIS-MCP → Home-Assistant-REST-API → Home Assistant
+LLM → MCP-Werkzeug set_application_power  → JARVIS-MCP → Monitoring-Tool-REST-API → Docker
 ```
 
 ## Werkzeuge
+
+### Home Assistant — Lichter und Routinen
 
 | Werkzeug | Parameter | Wirkung |
 |---|---|---|
@@ -21,6 +24,31 @@ LLM → MCP-Werkzeug set_light_power → JARVIS-MCP → Home-Assistant-REST-API 
 | `run_ha_routine` | `name` | Löst eine Home-Assistant-Szene oder ein -Skript aus |
 | `get_lights_status` | `area` (optional) | Sagt, welche Lichter gerade an sind — im ganzen Haus oder in einem Bereich |
 | `get_light_status` | `light` | Sagt, ob ein einzelnes Licht an oder aus ist |
+
+### Monitoring Tool — Anwendungen auf dem Server
+
+| Werkzeug | Parameter | Wirkung |
+|---|---|---|
+| `get_applications_status` | `application` (optional) | Sagt, wie es den Anwendungen geht — wie viele laufen, ob etwas ausgefallen oder absichtlich gestoppt ist; mit Namen nur für diese eine |
+| `set_application_power` | `application`, `power` | Startet bzw. stoppt den Docker-Container der genannten Anwendung |
+
+Angesprochen wird über den **Anwendungsnamen**, nicht über den Containernamen: „Monetheus" statt
+`monetheus-backend-1`. Der Containername ist technisch gewachsen, der Anwendungsname ist der, unter
+dem der Dienst im Haus bekannt ist — und der, den man ausspricht. Aufgelöst wird er hier und nicht im
+Monitoring Tool: Dort steht ein Dienst mit Kennungen, hier steht der Nutzer mit einer Äußerung, und
+die Rückfrage bei Mehrdeutigkeit gehört an das Ende, an dem sie gestellt werden kann.
+
+Eine so gestoppte Anwendung gilt als **absichtlich ausgeschaltet** und nicht als Ausfall — das
+Monitoring Tool merkt sich den Soll-Zustand, JARVIS-MCP muss dafür nichts nachbauen. Ist die
+Anwendung schon im gewünschten Zustand, wird gar nicht geschaltet, sondern gesagt, dass nichts zu tun
+war. Und lehnt das Monitoring Tool den Eingriff ab — geschützter Container, Steuerung abgeschaltet,
+Docker nicht erreichbar —, kommt dessen Begründung als Antwort zurück statt eines Protokollfehlers.
+
+Zwischengespeichert wird hier **nichts**, auch nicht die Namen: Sie kommen aus derselben schlanken
+Antwort wie die Zustände, und die darf nicht altern. Anders als bei Home Assistant kostet das nichts —
+der Aufruf geht an einen Dienst im selben Docker-Netz.
+
+### Gemeinsames
 
 `power` nimmt `on` bzw. `off` entgegen (und ein paar naheliegende Varianten wie `an`/`aus`).
 Namen werden unabhängig von Groß-/Kleinschreibung und Umlautschreibweise erkannt: `Büro`,
@@ -43,9 +71,32 @@ kann es sofort über `run_ha_routine` ansprechen — an JARVIS-MCP ist dafür ni
 ## Betrieb
 
 ```bash
-cp .env.example .env      # JARVIS_MCP_AUTH_TOKEN und HA_TOKEN eintragen
+cp .env.example .env      # JARVIS_MCP_AUTH_TOKEN, HA_TOKEN und MONITORING_TOKEN eintragen
 docker compose up -d --build
 ```
+
+`MONITORING_TOKEN` muss demselben Wert entsprechen, der im Monitoring Tool als
+`MONITORING_INTEGRATION_TOKEN` hinterlegt ist. Fehlt er, scheitern nur die Monitoring-Werkzeuge (mit
+einer deutlichen Warnung beim Start) — der Rest läuft weiter; wer sie gar nicht will, setzt
+`MONITORING_ENABLED=false`, dann tauchen sie nicht einmal in der Werkzeugliste auf.
+
+Der Stack hängt sich an das gemeinsame Netz **`jarvis-net`** und spricht das Monitoring-Backend
+direkt unter `monitoring-backend:8080` an. Das ist nicht nur bequemer als ein Hostport, sondern
+notwendig: Das Monitoring-Backend ist bewusst an `127.0.0.1` gebunden und aus einem Bridge-Container
+deshalb nicht über `host.docker.internal` erreichbar — und es an `0.0.0.0` freizugeben würde auch
+dessen ungeschütztes `/api/v1` ins Netz stellen.
+
+**Von Hand ist dafür nichts zu tun.** Beide Stacks deklarieren das Netz gleich (Name `jarvis-net`,
+Treiber `bridge`): Wer zuerst hochkommt, legt es an, der zweite benutzt es mit, und der letzte
+`docker compose down` räumt es wieder weg. Damit gibt es **keine Startreihenfolge** — beide Dienste
+lassen sich unabhängig und in beliebiger Reihenfolge ausrollen und neu starten, und ein versehentlich
+entferntes Netz heilt sich beim nächsten `up` selbst.
+
+Die naheliegenden Alternativen sind beide schlechter: Gehörte das Netz einem der Stacks (`external`
+auf der anderen Seite), könnte dessen `docker compose down` den anderen am Hochfahren hindern; wäre
+es auf beiden Seiten `external`, müsste es einmal pro Host von Hand angelegt werden und ohne es
+startet keiner der beiden. Wichtig ist nur, dass **beide Seiten dieselben Angaben** machen — weichen
+Name oder Treiber ab, verweigert Compose den Start.
 
 | | |
 |---|---|
@@ -68,8 +119,8 @@ Das ist ein fremder Stack aus Sicht des Monitoring-Backends — der Rückweg lä
 der Selbstaufruf-Fallstrick des eigenen Stacks greift hier also nicht. Voraussetzung ist der dort
 bereits gesetzte `extra_hosts`-Eintrag `jarvis:host-gateway`.
 
-**Es gibt nichts zu konfigurieren.** Bereiche, Lichter und Routinen liest JARVIS-MCP aus Home
-Assistant — die Bereiche über dessen Template-Engine (`areas()` / `area_name()` via
+**Über die Token hinaus gibt es nichts zu konfigurieren.** Bereiche, Lichter und Routinen liest
+JARVIS-MCP aus Home Assistant — die Bereiche über dessen Template-Engine (`areas()` / `area_name()` via
 `POST /api/template`), den Rest über `GET /api/states`. Ein neuer Bereich oder ein neues Licht in
 Home Assistant ist damit sofort ansprechbar.
 
@@ -84,10 +135,13 @@ SPRING_APPLICATION_JSON={"jarvis-mcp":{"home-assistant":{"areas":[{"id":"arbeits
 Die echten Namen aus Home Assistant funktionieren weiterhin. Meist ist es einfacher, den Bereich
 in Home Assistant gleich so zu nennen.
 
+Ebenso für die Anwendungen: Welche es gibt, wie sie heißen und welcher Container zu welcher gehört,
+steht im Monitoring Tool. Ein dort neu eingetragener Dienst ist sofort ansprechbar.
+
 ## Entwicklung
 
 ```bash
-./mvnw test                 # alle Tests, inkl. MCP-Durchlauf gegen einen Home-Assistant-Stub
+./mvnw test                 # alle Tests, inkl. MCP-Durchlauf gegen Stubs beider Gegenstellen
 ./mvnw spring-boot:run      # lokal, HA_BASE_URL und HA_TOKEN als Umgebungsvariablen
 ```
 
@@ -95,13 +149,19 @@ in Home Assistant gleich so zu nennen.
 
 ```
 tools/homeassistant/   Werkzeuge, REST-Client, Entitäten-Index und Konfiguration dieser Integration
+tools/monitoring/      Werkzeuge, REST-Client, Namensauflösung und Textaufbereitung fürs Monitoring Tool
 security/              Bearer-Token-Prüfung vor dem MCP-Endpunkt
-common/                Namensnormalisierung, von allen Modulen genutzt
+common/                Namensnormalisierung, An-/Aus-Vokabular, Zwischenspeicher — von allen Modulen genutzt
 ```
 
 Jede Integration liegt in einem eigenen Paket unter `tools/` und bringt Werkzeuge, Client und
-Konfiguration selbst mit. Eine weitere Integration (Monitoring Tool, Obsidian, Dateien) kommt als
-zusätzliches Paket dazu — an den bestehenden ist dafür nichts zu ändern.
+Konfiguration selbst mit. Eine weitere Integration (Obsidian, Dateien) kommt als zusätzliches Paket
+dazu — an den bestehenden ist dafür nichts zu ändern.
+
+Damit das auch stimmt, gibt ein Modul nach außen **nur seine eigenen Typen** als Bean heraus:
+`HttpClient` und `RestClient` entstehen modul-intern. Sonst gäbe es sie zweimal im Kontext, jede
+Einspritzung nach Typ wäre mehrdeutig, und ein neues Modul würde ein bestehendes brechen — genau das
+ist beim zweiten Modul passiert.
 
 ### Wo die Geschwindigkeit herkommt
 
@@ -138,4 +198,5 @@ zurückbleibt.
 
 - **JARVIS-AIService** — der MCP-Client dieses Servers
 - **JARVIS-Pilot** — Oberfläche des Gesamtsystems
-- **Monitoring Tool** — überwacht diesen Dienst; nächster Kandidat für ein eigenes Tool-Modul
+- **Monitoring Tool** — überwacht diesen Dienst und ist zugleich die Gegenstelle des Moduls
+  `tools/monitoring` (dessen Schnittstelle `/api/integration/v1`)

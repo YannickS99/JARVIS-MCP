@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.yannicks99.jarvis_mcp.tools.homeassistant.StubHomeAssistant;
+import io.github.yannicks99.jarvis_mcp.tools.monitoring.StubMonitoringTool;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
@@ -36,6 +37,7 @@ import org.springframework.test.context.DynamicPropertySource;
                 "jarvis-mcp.auth.token=geheim",
                 "jarvis-mcp.home-assistant.cache-ttl=5m",
                 "jarvis-mcp.home-assistant.token=ha-token",
+                "jarvis-mcp.monitoring.token=monitoring-geheim",
                 // Bereiche aus einer YAML-Datei - derselbe Weg wie config/application.yaml im Betrieb.
                 "spring.config.import=classpath:test-areas.yaml",
                 // Der Health-Port darf nicht fest belegt sein, sonst kollidieren parallele Laeufe.
@@ -44,6 +46,7 @@ import org.springframework.test.context.DynamicPropertySource;
 class McpServerIntegrationTest {
 
     private static StubHomeAssistant homeAssistant;
+    private static StubMonitoringTool monitoringTool;
 
     @LocalServerPort
     private int port;
@@ -64,14 +67,28 @@ class McpServerIntegrationTest {
                         "arbeitszimmer", "Arbeitszimmer"));
     }
 
+    @BeforeAll
+    static void startMonitoringTool() throws IOException {
+        monitoringTool = new StubMonitoringTool();
+        monitoringTool.status(StubMonitoringTool.status(3, 1, 1, 0, 0, 1,
+                StubMonitoringTool.application(1L, "Monetheus", "UP", "HTTP 200", true,
+                        "monetheus-backend", "running"),
+                StubMonitoringTool.application(2L, "FilmPickr", "DOWN", "Verbindung abgelehnt", true,
+                        "filmpickr-backend", "exited"),
+                StubMonitoringTool.application(3L, "Odysseus", "INACTIVE",
+                        "Ueber das Monitoring Tool gestoppt", true, "odysseus", "exited")));
+    }
+
     @AfterAll
-    static void stopHomeAssistant() {
+    static void stopStubs() {
         homeAssistant.close();
+        monitoringTool.close();
     }
 
     @DynamicPropertySource
-    static void homeAssistantAddress(DynamicPropertyRegistry registry) {
+    static void stubAddresses(DynamicPropertyRegistry registry) {
         registry.add("jarvis-mcp.home-assistant.base-url", homeAssistant::baseUrl);
+        registry.add("jarvis-mcp.monitoring.base-url", monitoringTool::baseUrl);
     }
 
     @AfterEach
@@ -81,6 +98,7 @@ class McpServerIntegrationTest {
             client = null;
         }
         homeAssistant.calls().clear();
+        monitoringTool.actions().clear();
     }
 
     private McpSyncClient connect(String token) {
@@ -114,14 +132,15 @@ class McpServerIntegrationTest {
     }
 
     @Test
-    @DisplayName("die fuenf Home-Assistant-Werkzeuge stehen mit ihren Parametern bereit")
+    @DisplayName("die Werkzeuge beider Module stehen mit ihren Parametern bereit")
     void listsTools() {
         client = connect("geheim");
         List<McpSchema.Tool> tools = client.listTools().tools();
 
         assertThat(tools).extracting(McpSchema.Tool::name)
                 .containsExactlyInAnyOrder("set_area_lights_power", "set_light_power", "run_ha_routine",
-                        "get_lights_status", "get_light_status");
+                        "get_lights_status", "get_light_status",
+                        "get_applications_status", "set_application_power");
 
         McpSchema.Tool areaTool = tools.stream()
                 .filter(tool -> tool.name().equals("set_area_lights_power"))
@@ -143,6 +162,47 @@ class McpServerIntegrationTest {
                 .containsOnlyKeys("area");
         assertThat(statusTool.inputSchema()).extracting("required", InstanceOfAssertFactories.LIST)
                 .doesNotContain("area");
+
+        // Dasselbe beim Monitoring: Die Anwendung ist optional, damit die KI nach allen fragen kann.
+        McpSchema.Tool applicationsTool = tools.stream()
+                .filter(tool -> tool.name().equals("get_applications_status"))
+                .findFirst().orElseThrow();
+        assertThat(applicationsTool.inputSchema()).extracting("properties", InstanceOfAssertFactories.MAP)
+                .containsOnlyKeys("application");
+        assertThat(applicationsTool.inputSchema()).extracting("required", InstanceOfAssertFactories.LIST)
+                .doesNotContain("application");
+    }
+
+    @Test
+    @DisplayName("die Statusabfrage der Anwendungen laeuft ueber das echte Protokoll")
+    void reportsApplicationsStatus() {
+        client = connect("geheim");
+
+        McpSchema.CallToolResult result = call("get_applications_status", Map.of());
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result))
+                .contains("Von 3 Anwendungen laeuft 1.")
+                .contains("Ausgefallen: FilmPickr.")
+                .contains("Absichtlich gestoppt: Odysseus.");
+        // Eine Statusfrage schaltet nichts.
+        assertThat(monitoringTool.actions()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("eine Anwendung wird ueber ihren Namen gestoppt, nicht ueber den Containernamen")
+    void switchesApplicationByName() {
+        client = connect("geheim");
+
+        McpSchema.CallToolResult result = call("set_application_power",
+                Map.of("application", "monetheus", "power", "aus"));
+
+        assertThat(result.isError()).isFalse();
+        assertThat(monitoringTool.actions()).singleElement().satisfies(action -> {
+            assertThat(action.applicationId()).isEqualTo(1L);
+            assertThat(action.action()).isEqualTo("stop");
+            assertThat(action.token()).isEqualTo("Bearer monitoring-geheim");
+        });
     }
 
     @Test

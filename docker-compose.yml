@@ -27,6 +27,16 @@ services:
       HA_BASE_URL: ${HA_BASE_URL:-http://host.docker.internal:8123}
       HA_TOKEN: ${HA_TOKEN:?HA_TOKEN muss in der .env gesetzt sein}
       HA_CACHE_TTL: ${HA_CACHE_TTL:-60s}
+      # Integrationsschnittstelle des Monitoring Tools. Erreicht wird sie ueber dessen
+      # Compose-Netz (siehe networks unten), nicht ueber einen Hostport - das Backend
+      # veroeffentlicht bewusst nur auf 127.0.0.1.
+      MONITORING_BASE_URL: ${MONITORING_BASE_URL:-http://monitoring-backend:8080}
+      # Ohne diesen Wert scheitern die Monitoring-Werkzeuge bei jedem Aufruf - die Anwendung
+      # sagt das beim Start deutlich. Bewusst nicht erzwungen, damit ein fehlendes Geheimnis
+      # nicht den ganzen Stack samt der Home-Assistant-Werkzeuge blockiert; wer die
+      # Monitoring-Werkzeuge nicht will, setzt MONITORING_ENABLED=false.
+      MONITORING_TOKEN: ${MONITORING_TOKEN:-}
+      MONITORING_ENABLED: ${MONITORING_ENABLED:-true}
       JARVIS_MCP_LOG_LEVEL: ${JARVIS_MCP_LOG_LEVEL:-INFO}
       # Nur fuer den Ausnahmefall, dass ein Bereich anders angesprochen werden soll, als er in
       # Home Assistant heisst - die Bereiche selbst holt sich JARVIS-MCP von dort. Beispiel:
@@ -35,7 +45,35 @@ services:
       TZ: ${TZ:-Europe/Berlin}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      # Eigenes Netz fuer diesen Stack ...
+      - default
+      # ... und zusaetzlich das gemeinsame Netz der JARVIS-Dienste, ueber das das
+      # Monitoring-Backend unter "monitoring-backend:8080" erreichbar ist. Der Umweg ueber einen
+      # Hostport faellt damit weg - und das ist hier nicht nur bequemer, sondern notwendig: Das
+      # Monitoring-Backend ist an 127.0.0.1 gebunden und aus einem Bridge-Container deshalb nicht
+      # ueber host.docker.internal zu erreichen. Es an 0.0.0.0 freizugeben waere die falsche
+      # Loesung, denn dann laege auch dessen ungeschuetztes /api/v1 im Netz.
+      - jarvis-net
     ports:
       # Kein Loopback-Praefix: siehe Begruendung im Kopf dieser Datei.
       - "${MCP_PORT:-8098}:8098"
       - "${HEALTH_PORT:-8099}:8099"
+
+networks:
+  default:
+
+  # Gemeinsames Netz der JARVIS-Dienste, ueber das das Monitoring-Backend erreichbar ist.
+  #
+  # Nicht "external", sondern beidseitig gleich deklariert: Der Stack, der zuerst hochkommt, legt
+  # das Netz an, der zweite benutzt es mit - und wird es nicht mehr gebraucht, raeumt es der
+  # letzte "down" wieder weg. Damit ist weder ein Handgriff von Hand noetig noch eine
+  # Startreihenfolge vorgegeben: Beide Dienste lassen sich unabhaengig und in beliebiger
+  # Reihenfolge ausrollen und neu starten, und ein versehentlich entferntes Netz heilt sich beim
+  # naechsten "up" selbst.
+  #
+  # WICHTIG: Der Monitoring-Tool-Stack deklariert dasselbe Netz unter demselben Namen und mit
+  # demselben Treiber. Weichen die Angaben voneinander ab, verweigert Compose den Start.
+  jarvis-net:
+    name: jarvis-net
+    driver: bridge
