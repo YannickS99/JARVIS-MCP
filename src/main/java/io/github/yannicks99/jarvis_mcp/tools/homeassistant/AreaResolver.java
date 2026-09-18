@@ -31,9 +31,11 @@ public class AreaResolver {
     /** Zusaetzliche Namen aus der Konfiguration, einmal beim Start in Suchform gebracht. */
     private final Map<String, String> configuredAliases;
     private final List<String> configuredNames;
+    private final List<AreaMapping> configured;
 
     public AreaResolver(RefreshingCache<AreaIndex> areas, List<AreaMapping> configured) {
         this.areas = areas;
+        this.configured = List.copyOf(configured);
 
         Map<String, String> aliases = HashMap.newHashMap(configured.size() * 4);
         List<String> names = new ArrayList<>(configured.size());
@@ -86,6 +88,20 @@ public class AreaResolver {
         return List.copyOf(names);
     }
 
+    /**
+     * Die Bereiche, wie Home Assistant sie gerade kennt - fuer den Entity-Katalog.
+     *
+     * @throws RuntimeException wenn Home Assistant noch nie erreichbar war
+     */
+    public List<HomeAssistantArea> homeAssistantAreas() {
+        return areas.get().areas();
+    }
+
+    /** Die zusaetzlichen Namen aus der Konfiguration, so wie sie eingetragen sind. */
+    public List<AreaMapping> configuredAreas() {
+        return configured;
+    }
+
     /** Ob die Bereiche schon einmal aus Home Assistant geladen werden konnten. */
     public boolean loadedFromHomeAssistant() {
         return areas.isLoaded();
@@ -109,9 +125,10 @@ public class AreaResolver {
 
     /**
      * Unveraenderliches Abbild der Bereiche aus Home Assistant: alle Schreibvarianten der Namen
-     * auf die jeweilige {@code area_id}, dazu die Anzeigenamen in Reihenfolge.
+     * auf die jeweilige {@code area_id}, dazu die Bereiche selbst und ihre Anzeigenamen in
+     * Reihenfolge.
      */
-    public record AreaIndex(Map<String, String> byName, List<String> names) {
+    public record AreaIndex(Map<String, String> byName, List<HomeAssistantArea> areas, List<String> names) {
 
         public static AreaIndex of(List<HomeAssistantArea> areas) {
             Map<String, String> byName = HashMap.newHashMap(areas.size() * 4);
@@ -123,7 +140,7 @@ public class AreaResolver {
                 register(byName, area.name(), area.areaId());
                 names.add(area.name());
             }
-            return new AreaIndex(Map.copyOf(byName), List.copyOf(names));
+            return new AreaIndex(Map.copyOf(byName), List.copyOf(areas), List.copyOf(names));
         }
     }
 }

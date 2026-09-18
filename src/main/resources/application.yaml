@@ -25,9 +25,11 @@ spring:
           mcp-endpoint: /mcp
         capabilities:
           tool: true
-          # Ressourcen, Prompts und Vervollstaendigung bietet dieser Server (noch) nicht an. Sie
-          # abzuschalten haelt den Handshake und die Faehigkeitsliste klein.
-          resource: false
+          # Resources liefern die ansprechbaren Namen (Bereiche, Lichter, Routinen, Anwendungen) an
+          # den semantischen Cache des JARVIS-AIService - siehe common/EntityCatalog.
+          resource: true
+          # Prompts und Vervollstaendigung bietet dieser Server (noch) nicht an. Sie abzuschalten
+          # haelt den Handshake und die Faehigkeitsliste klein.
           prompt: false
           completion: false
         # Knapp gehalten: Ein haengender Aufruf soll als Fehler zurueckkommen, solange der Nutzer

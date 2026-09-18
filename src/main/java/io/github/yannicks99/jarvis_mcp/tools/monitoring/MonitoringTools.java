@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpTool.McpAnnotations;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 
 /**
@@ -20,6 +21,10 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
  * <p>Angesprochen wird ueber den <em>Anwendungsnamen</em>, nicht ueber den Containernamen: "Monetheus"
  * statt "monetheus-backend-1". Der Containername ist technisch gewachsen, der Anwendungsname ist der,
  * unter dem der Dienst im Haus bekannt ist.
+ *
+ * <p>Die MCP-{@code ToolAnnotations} folgen derselben Regel wie bei den Home-Assistant-Werkzeugen: Der
+ * JARVIS-AIService wiederholt ohne Rueckfrage beim Sprachmodell nur, was idempotent und nicht rein
+ * lesend ist.
  */
 public class MonitoringTools {
 
@@ -32,6 +37,8 @@ public class MonitoringTools {
     }
 
     @McpTool(name = "get_applications_status",
+            annotations = @McpAnnotations(readOnlyHint = true, idempotentHint = true,
+                    destructiveHint = false, openWorldHint = false),
             description = """
                     Sagt, wie es den auf dem Server laufenden Anwendungen und Diensten geht - \
                     wie viele laufen, ob etwas ausgefallen oder absichtlich gestoppt ist. \
@@ -59,7 +66,11 @@ public class MonitoringTools {
         };
     }
 
+    // Idempotent wie die Lichtschalter: Eine bereits laufende Anwendung zu starten aendert nichts
+    // (siehe switchPower). Nicht destruktiv, weil ein Stopp jederzeit rueckgaengig zu machen ist.
     @McpTool(name = "set_application_power",
+            annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = true,
+                    destructiveHint = false, openWorldHint = false),
             description = """
                     Startet oder stoppt eine auf dem Server laufende Anwendung bzw. einen Dienst, \
                     indem deren Docker-Container gestartet oder gestoppt wird. Fuer Anweisungen \
