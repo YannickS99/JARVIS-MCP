@@ -68,6 +68,59 @@ genannt statt stillschweigend als „aus" gezählt.
 Neue „Protokolle" entstehen rein in Home Assistant: Wer dort eine Szene oder ein Skript anlegt,
 kann es sofort über `run_ha_routine` ansprechen — an JARVIS-MCP ist dafür nichts zu ändern.
 
+## Für den semantischen Cache des AIService
+
+Der [JARVIS-AIService](https://github.com/YannickS99/JARVIS-AIService) überspringt bei bekannten
+Befehlen das Sprachmodell und ruft das Werkzeug direkt auf (Anforderungskatalog
+**JARVIS-SemanticCache**). Zwei Dinge braucht er dafür von hier — beide über bestehende
+MCP-Mechanismen, damit er keine werkzeugspezifische Logik mitbringen muss.
+
+**1. Tool-Annotations: Was darf wiederholt werden?**
+
+Jedes Werkzeug trägt die MCP-Standardhinweise `readOnlyHint` und `idempotentHint`. Gecacht wird
+nur, was zustandsverändernd *und* idempotent ist:
+
+| Werkzeug | `readOnlyHint` | `idempotentHint` | cachebar |
+|---|---|---|---|
+| `set_area_lights_power` | `false` | `true` | ja |
+| `set_light_power` | `false` | `true` | ja |
+| `set_application_power` | `false` | `true` | ja |
+| `run_ha_routine` | `false` | `false` | nein |
+| `get_lights_status`, `get_light_status`, `get_applications_status` | `true` | — | nein |
+
+`run_ha_routine` ist bewusst konservativ: Szenen und Skripte werden in Home Assistant frei
+definiert und garantieren keine reine Zustandssetzung — ein Skript darf etwas umschalten. Diese
+Hinweise sind damit keine Dokumentation, sondern steuern Verhalten auf der anderen Seite.
+
+**2. Entity-Resources: Wie heißen die Dinge?**
+
+Damit der Cache „Wohnzimmer" in einer Äußerung als Platzhalter erkennt, braucht er dieselben
+Namen, die hier ohnehin warmgehalten werden. Sie kommen als **Resources** (reiner Datenabruf, kein
+Seiteneffekt — das Sprachmodell sieht sie nicht):
+
+| URI | Inhalt |
+|---|---|
+| `homeassistant://areas-and-entities` | Bereiche samt konfigurierter Zusatznamen, Lichter, Routinen |
+| `monitoring://applications` | die im Monitoring Tool hinterlegten Anwendungen |
+
+Beide liefern dasselbe Format mit dem MIME-Typ `application/vnd.jarvis.entities+json`:
+
+```json
+{"entities": [
+  {"type": "area",  "name": "Arbeitszimmer", "ref": "arbeitszimmer", "aliases": ["Büro"]},
+  {"type": "light", "name": "Stehlampe",     "ref": "light.stehlampe", "aliases": []}
+]}
+```
+
+`type` heißt wie der Werkzeugparameter, der den Namen entgegennimmt (`area`, `light`,
+`application`) — daran erkennt der AIService, welcher Name in welches Argument gehört, und lernt
+kein `set_light_power(light="Wohnzimmer")`, wenn „Wohnzimmer" ein Bereich ist.
+
+**Der AIService sucht die Resources am MIME-Typ, nicht an der URI.** Ein neues Werkzeugmodul macht
+seine Namen also bekannt, indem es eine weitere solche Resource anbietet
+(`common/EntityCatalog.java`) — dort ist dafür nichts zu ändern. Gelesen wird im
+Hintergrundtakt, ein Abruf kostet keinen zusätzlichen Aufruf bei Home Assistant.
+
 ## Betrieb
 
 ```bash
@@ -151,7 +204,7 @@ steht im Monitoring Tool. Ein dort neu eingetragener Dienst ist sofort ansprechb
 tools/homeassistant/   Werkzeuge, REST-Client, Entitäten-Index und Konfiguration dieser Integration
 tools/monitoring/      Werkzeuge, REST-Client, Namensauflösung und Textaufbereitung fürs Monitoring Tool
 security/              Bearer-Token-Prüfung vor dem MCP-Endpunkt
-common/                Namensnormalisierung, An-/Aus-Vokabular, Zwischenspeicher — von allen Modulen genutzt
+common/                Namensnormalisierung, An-/Aus-Vokabular, Zwischenspeicher, Entity-Katalog — von allen Modulen genutzt
 ```
 
 Jede Integration liegt in einem eigenen Paket unter `tools/` und bringt Werkzeuge, Client und

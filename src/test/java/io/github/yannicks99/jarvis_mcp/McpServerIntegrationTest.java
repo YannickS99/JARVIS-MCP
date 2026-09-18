@@ -174,6 +174,65 @@ class McpServerIntegrationTest {
     }
 
     @Test
+    @DisplayName("jedes Werkzeug sagt, ob es ohne Rueckfrage beim Sprachmodell wiederholt werden darf")
+    void annotatesCacheability() {
+        client = connect("geheim");
+        Map<String, McpSchema.ToolAnnotations> annotations = client.listTools().tools().stream()
+                .collect(java.util.stream.Collectors.toMap(McpSchema.Tool::name, McpSchema.Tool::annotations));
+
+        // Genau diese drei sind cachebar: zustandsveraendernd, aber idempotent.
+        assertThat(annotations).allSatisfy((name, hints) -> {
+            boolean cacheable = !hints.readOnlyHint() && hints.idempotentHint();
+            assertThat(cacheable).as(name).isEqualTo(
+                    List.of("set_area_lights_power", "set_light_power", "set_application_power").contains(name));
+        });
+        assertThat(annotations.get("get_lights_status").readOnlyHint()).isTrue();
+        assertThat(annotations.get("get_applications_status").readOnlyHint()).isTrue();
+        // Routinen sind frei definiert und deshalb bewusst nicht idempotent.
+        assertThat(annotations.get("run_ha_routine").idempotentHint()).isFalse();
+    }
+
+    @Test
+    @DisplayName("die ansprechbaren Namen stehen als Entity-Resources bereit")
+    void listsEntityResources() {
+        client = connect("geheim");
+
+        assertThat(client.listResources().resources())
+                .extracting(McpSchema.Resource::uri, McpSchema.Resource::mimeType)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("homeassistant://areas-and-entities",
+                                "application/vnd.jarvis.entities+json"),
+                        org.assertj.core.groups.Tuple.tuple("monitoring://applications",
+                                "application/vnd.jarvis.entities+json"));
+    }
+
+    @Test
+    @DisplayName("die Home-Assistant-Resource nennt Bereiche samt Alias, Lichter und Routinen")
+    void readsHomeAssistantEntities() {
+        client = connect("geheim");
+
+        String json = resourceText("homeassistant://areas-and-entities");
+
+        assertThat(json)
+                .contains("{\"type\":\"area\",\"name\":\"Arbeitszimmer\",\"ref\":\"arbeitszimmer\",\"aliases\":[\"Büro\"]}")
+                .contains("{\"type\":\"light\",\"name\":\"Stehlampe\",\"ref\":\"light.stehlampe\",\"aliases\":[]}")
+                .contains("{\"type\":\"routine\",\"name\":\"Gute Nacht\",\"ref\":\"script.gute_nacht\",\"aliases\":[]}");
+        // Ein Abruf liest den warmgehaltenen Stand - geschaltet wird dabei nichts.
+        assertThat(homeAssistant.calls()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("die Monitoring-Resource nennt die Anwendungen unter ihrem Anwendungsnamen")
+    void readsApplications() {
+        client = connect("geheim");
+
+        assertThat(resourceText("monitoring://applications"))
+                .contains("{\"type\":\"application\",\"name\":\"Monetheus\",\"ref\":\"1\",\"aliases\":[]}")
+                .contains("\"name\":\"Odysseus\"");
+        assertThat(monitoringTool.actions()).isEmpty();
+    }
+
+    @Test
     @DisplayName("die Statusabfrage der Anwendungen laeuft ueber das echte Protokoll")
     void reportsApplicationsStatus() {
         client = connect("geheim");
@@ -338,6 +397,14 @@ class McpServerIntegrationTest {
 
     private McpSchema.CallToolResult call(String tool, Map<String, Object> arguments) {
         return client.callTool(new McpSchema.CallToolRequest(tool, arguments));
+    }
+
+    private String resourceText(String uri) {
+        McpSchema.ReadResourceResult result = client.readResource(new McpSchema.ReadResourceRequest(uri));
+        assertThat(result.contents()).singleElement()
+                .extracting(McpSchema.ResourceContents::mimeType)
+                .isEqualTo("application/vnd.jarvis.entities+json");
+        return ((McpSchema.TextResourceContents) result.contents().getFirst()).text();
     }
 
     private static String text(McpSchema.CallToolResult result) {

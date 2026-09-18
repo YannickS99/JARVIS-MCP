@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpTool.McpAnnotations;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 
 /**
@@ -17,6 +18,13 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
  * solange die KI etwas damit anfangen kann - ein falsch verstandener Lichtname soll zu einem
  * zweiten, besseren Versuch fuehren und nicht zu einem Protokollfehler, der beim Modell nur als
  * "Werkzeug kaputt" ankommt. Geworfen wird nur, wenn Home Assistant selbst nicht mitspielt.
+ *
+ * <p>Jedes Werkzeug traegt die MCP-{@code ToolAnnotations} (Anforderungskatalog JARVIS-SemanticCache,
+ * Abschnitt 4). Der JARVIS-AIService liest daraus, welche Werkzeuge er ohne erneute Rueckfrage beim
+ * Sprachmodell wiederholen darf: nur zustandsveraendernde, die bei wiederholter Ausfuehrung nichts
+ * anderes bewirken ({@code idempotentHint = true}, {@code readOnlyHint = false}). Die Hinweise sind
+ * damit keine Dokumentation, sondern steuern Verhalten - eine falsche Angabe hier fuehrt dort zu einer
+ * falsch zwischengespeicherten Aktion.
  */
 public class HomeAssistantTools {
 
@@ -41,6 +49,8 @@ public class HomeAssistantTools {
     }
 
     @McpTool(name = "set_area_lights_power",
+            annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = true,
+                    destructiveHint = false, openWorldHint = false),
             description = """
                     Schaltet alle Lichter eines Raums bzw. Bereichs im Haus gemeinsam an oder aus. \
                     Fuer Anweisungen, die einen Raum nennen statt einer einzelnen Lampe, \
@@ -68,6 +78,8 @@ public class HomeAssistantTools {
     }
 
     @McpTool(name = "set_light_power",
+            annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = true,
+                    destructiveHint = false, openWorldHint = false),
             description = """
                     Schaltet ein einzelnes, namentlich genanntes Licht an oder aus. \
                     Fuer Anweisungen, die eine bestimmte Lampe nennen, z. B. \
@@ -96,7 +108,12 @@ public class HomeAssistantTools {
         };
     }
 
+    // Bewusst nicht idempotent: Szenen und Skripte werden in Home Assistant frei definiert und
+    // garantieren keine reine Zustandssetzung - ein Skript darf etwa etwas umschalten. Wer eine
+    // Routine erneut ausloest, bekommt unter Umstaenden nicht dasselbe Ergebnis.
     @McpTool(name = "run_ha_routine",
+            annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = false,
+                    destructiveHint = true, openWorldHint = false),
             description = """
                     Loest eine in Home Assistant hinterlegte Routine aus - eine Szene oder ein \
                     Skript, das mehrere Geraete auf einmal schaltet, z. B. "Gute Nacht". \
@@ -127,6 +144,8 @@ public class HomeAssistantTools {
     }
 
     @McpTool(name = "get_lights_status",
+            annotations = @McpAnnotations(readOnlyHint = true, idempotentHint = true,
+                    destructiveHint = false, openWorldHint = false),
             description = """
                     Sagt, welche Lichter gerade an sind - im ganzen Haus oder, wenn ein Bereich \
                     genannt wird, nur in diesem. Fuer Fragen nach dem Zustand statt nach einer \
@@ -160,6 +179,8 @@ public class HomeAssistantTools {
     }
 
     @McpTool(name = "get_light_status",
+            annotations = @McpAnnotations(readOnlyHint = true, idempotentHint = true,
+                    destructiveHint = false, openWorldHint = false),
             description = """
                     Sagt, ob ein einzelnes, namentlich genanntes Licht gerade an oder aus ist - \
                     fuer Fragen wie "ist die Stehlampe an?". Fuer einen ganzen Raum oder das \

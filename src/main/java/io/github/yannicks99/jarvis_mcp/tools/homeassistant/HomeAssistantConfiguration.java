@@ -112,6 +112,12 @@ public class HomeAssistantConfiguration {
         return new HomeAssistantTools(client, index, areas);
     }
 
+    @Bean
+    HomeAssistantResources homeAssistantResources(HomeAssistantEntityIndex index, AreaResolver areas,
+            ObjectMapper jsonMapper) {
+        return new HomeAssistantResources(index, areas, jsonMapper);
+    }
+
     /**
      * Haelt den Entitaeten-Index warm.
      *
