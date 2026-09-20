@@ -42,9 +42,25 @@ services:
       # Home Assistant heisst - die Bereiche selbst holt sich JARVIS-MCP von dort. Beispiel:
       # SPRING_APPLICATION_JSON='{"jarvis-mcp":{"home-assistant":{"areas":[{"id":"arbeitszimmer","names":["Büro"]}]}}}'
       SPRING_APPLICATION_JSON: ${SPRING_APPLICATION_JSON:-}
+      # Obsidian-Vault: aus, solange OBSIDIAN_DIR in der .env nicht gesetzt ist. Der Container
+      # sieht den Ordner immer unter /srv/vault, egal wo er auf dem Host liegt.
+      OBSIDIAN_ENABLED: ${OBSIDIAN_ENABLED:-false}
+      OBSIDIAN_WRITABLE: ${OBSIDIAN_WRITABLE:-true}
       TZ: ${TZ:-Europe/Berlin}
+    # Der Vault gehoert auf JARVIS dem Benutzer 1000:1000, und seine Ordner geben "anderen" keinen
+    # Zugriff (drwxrwx---). Das Image legt sich einen eigenen Benutzer an (1001) - damit kaeme der
+    # Container weder lesend noch schreibend an den Ordner, und was er als root anlegte, waere
+    # ueber Samba hinterher nicht mehr zu bearbeiten. Deshalb laeuft der Dienst unter der Kennung,
+    # der die Dateien gehoeren. Bewusst hier und nicht im Image: Es ist eine Eigenheit dieses
+    # Servers, keine des Programms.
+    user: "${RUN_AS:-1000:1000}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      # Nur der freigegebene Teil des Vaults, nicht dessen Wurzel: Was hier nicht eingehaengt ist,
+      # existiert im Container nicht und ist auch bei einem Fehler im Code nicht zu erreichen.
+      # In der Testphase ist das ein einzelner Ordner - siehe .env.example.
+      - "${OBSIDIAN_DIR:-/dev/null}:/srv/vault"
     networks:
       # Eigenes Netz fuer diesen Stack ...
       - default
