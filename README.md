@@ -48,6 +48,42 @@ Zwischengespeichert wird hier **nichts**, auch nicht die Namen: Sie kommen aus d
 Antwort wie die Zustände, und die darf nicht altern. Anders als bei Home Assistant kostet das nichts —
 der Aufruf geht an einen Dienst im selben Docker-Netz.
 
+### Obsidian — Notizen aus Yannicks Vault
+
+Umsetzung des Anforderungskatalogs **JARVIS-Obsidian** (Abschnitt 6). Standardmäßig **aus**: Ohne
+eingehängten Vault-Ordner erscheinen die Werkzeuge gar nicht erst in `tools/list`.
+
+| Werkzeug | Parameter | Wirkung |
+|---|---|---|
+| `read_note` | `path` | Gibt den Markdown-Text einer Notiz zurück, dazu ihren „Stand" |
+| `list_notes` | `folder` (optional) | Listet die Notizen mit Pfad, Größe und letzter Änderung |
+| `search_notes` | `query`, `folder` (optional) | Volltextsuche über Text und Dateinamen, nennt Pfad und Fundstelle |
+| `create_note` | `path`, `content` | Legt eine neue Notiz an; eine bestehende wird nie überschrieben |
+| `append_note` | `path`, `content` | Hängt Text ans Ende einer Notiz an |
+| `replace_section` | `path`, `heading`, `content`, `stand` | Ersetzt den Inhalt eines Abschnitts, die Überschrift bleibt stehen |
+
+**Der Zugriff ist doppelt begrenzt.** In den Container kommt nur der freigegebene Ordner
+(`OBSIDIAN_DIR` → `/srv/vault`), nicht die Vault-Wurzel — was dort nicht eingehängt ist, existiert
+im Container nicht. Darüber liegt die Pfadprüfung: `..`, absolute Pfade, versteckte Ordner und
+symbolische Verknüpfungen nach draußen werden abgewiesen, bevor irgendetwas geöffnet wird.
+
+**Geschrieben wird ohne Rückfrage, aber nicht ohne Netz.** Eine Bestätigung vor jeder Änderung wäre
+im Gespräch nur lästig; stattdessen gilt dreierlei: Jede Änderung legt die **Vorgängerfassung** in
+`.jarvis-history` ab, geschrieben wird **atomar** (Nachbardatei, dann umbenennen), und
+`replace_section` verlangt den **Stand** aus `read_note` — hat jemand die Notiz inzwischen in
+Obsidian bearbeitet, wird abgebrochen statt überschrieben. Scheitert die Sicherung, unterbleibt die
+Änderung ganz.
+
+**Zum Verfeinern reicht Anhängen nicht** — deshalb `replace_section`. Es findet die Überschrift
+unabhängig von Groß-/Kleinschreibung, ersetzt alles bis zur nächsten gleich- oder höherrangigen
+Überschrift und lässt die folgenden Abschnitte unberührt. Ist die Überschrift unbekannt, nennt die
+Antwort die vorhandenen.
+
+**Der Container läuft unter `1000:1000`** (`RUN_AS` in der `.env`). Der Vault gehört auf JARVIS
+diesem Benutzer, und seine Ordner geben „anderen" keinen Zugriff; unter der Kennung aus dem Image
+(1001) käme der Dienst nicht heran, und als `root` angelegte Notizen wären über Samba hinterher
+nicht mehr zu bearbeiten.
+
 ### Gemeinsames
 
 `power` nimmt `on` bzw. `off` entgegen (und ein paar naheliegende Varianten wie `an`/`aus`).
@@ -86,11 +122,17 @@ nur, was zustandsverändernd *und* idempotent ist:
 | `set_light_power` | `false` | `true` | ja |
 | `set_application_power` | `false` | `true` | ja |
 | `run_ha_routine` | `false` | `false` | nein |
+| `create_note`, `append_note`, `replace_section` | `false` | `false` | nein |
 | `get_lights_status`, `get_light_status`, `get_applications_status` | `true` | — | nein |
+| `read_note`, `list_notes`, `search_notes` | `true` | — | nein |
 
 `run_ha_routine` ist bewusst konservativ: Szenen und Skripte werden in Home Assistant frei
 definiert und garantieren keine reine Zustandssetzung — ein Skript darf etwas umschalten. Diese
 Hinweise sind damit keine Dokumentation, sondern steuern Verhalten auf der anderen Seite.
+
+Die schreibenden Obsidian-Werkzeuge sind aus demselben Grund nicht idempotent: Zweimal angehängt
+steht der Text zweimal da. Und die lesenden gehören nicht in einen Cache, weil eine gerade in
+Obsidian geänderte Notiz sonst veraltet im Gespräch stünde.
 
 **2. Entity-Resources: Wie heißen die Dinge?**
 
@@ -203,6 +245,7 @@ steht im Monitoring Tool. Ein dort neu eingetragener Dienst ist sofort ansprechb
 ```
 tools/homeassistant/   Werkzeuge, REST-Client, Entitäten-Index und Konfiguration dieser Integration
 tools/monitoring/      Werkzeuge, REST-Client, Namensauflösung und Textaufbereitung fürs Monitoring Tool
+tools/obsidian/        Werkzeuge für den Vault, Dateizugriff (Vault) und Pfadprüfung (VaultPath)
 security/              Bearer-Token-Prüfung vor dem MCP-Endpunkt
 common/                Namensnormalisierung, An-/Aus-Vokabular, Zwischenspeicher, Entity-Katalog — von allen Modulen genutzt
 ```

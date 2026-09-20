@@ -40,7 +40,9 @@ spring:
           raumweise schalten, in Home Assistant hinterlegte Routinen (Szenen und Skripte)
           ausloesen und abfragen, welche Lichter gerade an sind. Dazu kommen die Anwendungen
           auf dem Server selbst: abfragen, wie es ihnen geht und ob etwas ausgefallen ist,
-          und sie unter ihrem Anwendungsnamen starten bzw. stoppen.
+          und sie unter ihrem Anwendungsnamen starten bzw. stoppen. Ist der Obsidian-Vault
+          angebunden, kommen Werkzeuge fuer Yannicks Notizen dazu: suchen, lesen, neue
+          anlegen, ergaenzen und einzelne Abschnitte ueberarbeiten.
 
 server:
   port: ${SERVER_PORT:8098}
@@ -103,6 +105,22 @@ jarvis-mcp:
     connect-timeout: ${MONITORING_CONNECT_TIMEOUT:2s}
     # Groesser als bei Home Assistant: Ein Container-Start wartet auf die Docker Engine.
     read-timeout: ${MONITORING_READ_TIMEOUT:10s}
+
+  obsidian:
+    # Vorgabe aus, anders als bei den uebrigen Modulen: Ohne eingehaengten Vault-Ordner wuerde
+    # jedes Werkzeug scheitern, und die KI soll Werkzeuge gar nicht erst sehen, die es auf dieser
+    # Maschine nicht gibt.
+    enabled: ${OBSIDIAN_ENABLED:false}
+    # Der Ordner aus Sicht des Containers. Die docker-compose.yml haengt dorthin nur den
+    # freigegebenen Teil des Vaults ein - der Rest existiert hier gar nicht.
+    root: ${OBSIDIAN_ROOT:/srv/vault}
+    # Schreibende Werkzeuge anbieten. Aus bedeutet: JARVIS darf den Vault lesen, aber nicht
+    # aendern - die Werkzeuge dafuer tauchen dann nicht einmal in tools/list auf.
+    writable: ${OBSIDIAN_WRITABLE:true}
+    # Obergrenze fuer den Text einer gelesenen Notiz; sie landet im Kontextfenster des Modells.
+    max-note-chars: ${OBSIDIAN_MAX_NOTE_CHARS:60000}
+    max-results: ${OBSIDIAN_MAX_RESULTS:40}
+    snippet-chars: ${OBSIDIAN_SNIPPET_CHARS:240}
 
 logging:
   level:
