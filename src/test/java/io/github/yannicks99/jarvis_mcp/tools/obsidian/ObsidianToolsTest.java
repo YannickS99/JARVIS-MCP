@@ -46,7 +46,7 @@ class ObsidianToolsTest {
     }
 
     private ObsidianProperties properties(boolean writable) {
-        return new ObsidianProperties(true, root, writable, 60_000, 40, 240);
+        return new ObsidianProperties(true, root, writable, "", "", 60_000, 40, 240);
     }
 
     // ------------------------------------------------------------------ lesen
@@ -64,7 +64,8 @@ class ObsidianToolsTest {
     @DisplayName("Eine ueberlange Notiz wird gekuerzt, nicht abgelehnt")
     void shortensOverlongNotes() throws IOException {
         Files.writeString(root.resolve("Lang.md"), "x".repeat(500));
-        ObsidianTools small = new ObsidianTools(new Vault(new ObsidianProperties(true, root, true, 100, 40, 240)));
+        ObsidianTools small = new ObsidianTools(
+                new Vault(new ObsidianProperties(true, root, true, "", "", 100, 40, 240)));
 
         String answer = small.readNote("Lang.md");
 

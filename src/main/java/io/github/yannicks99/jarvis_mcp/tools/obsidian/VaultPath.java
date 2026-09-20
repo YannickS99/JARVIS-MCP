@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.Set;
 
 /**
  * Uebersetzt einen Pfad aus einem Werkzeugaufruf in eine Datei innerhalb des freigegebenen Ordners -
@@ -80,6 +81,39 @@ final class VaultPath {
         Path resolved = root.resolve(candidate).normalize();
         ensureInside(root, resolved);
         return resolved;
+    }
+
+    /**
+     * Prueft, ob eine Notiz gesperrt ist - Privates, das die KI nichts angeht.
+     *
+     * <p>Geprueft wird gegen jeden Teil des Pfades, nicht nur den ersten: Ein gesperrter Ordner
+     * bleibt auch dann gesperrt, wenn er tiefer im Baum liegt.
+     */
+    static boolean denied(Path root, Path file, Set<String> denied) {
+        if (denied.isEmpty()) {
+            return false;
+        }
+        for (Path element : root.relativize(file)) {
+            if (denied.contains(element.toString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Stellt sicher, dass eine Aenderung im erlaubten Teil landet.
+     *
+     * <p>Gelesen wird im ganzen eingehaengten Bereich, geschrieben nur hier. Die zweite Ebene ist
+     * der Mount: Der Rest liegt im Container nur lesend, ein Schreibversuch scheitert also selbst
+     * dann, wenn diese Pruefung je umgangen wuerde.
+     */
+    static void ensureWritable(Path root, Path writeRoot, Path target) {
+        if (!target.normalize().startsWith(writeRoot.normalize())) {
+            throw new ObsidianException(("Geschrieben werden darf nur in \"%s\" - \"%s\" liegt "
+                    + "ausserhalb. Lesen geht im ganzen Vault.")
+                    .formatted(relative(root, writeRoot), relative(root, target)));
+        }
     }
 
     /**

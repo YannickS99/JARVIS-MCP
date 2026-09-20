@@ -117,6 +117,11 @@ jarvis-mcp:
     # Schreibende Werkzeuge anbieten. Aus bedeutet: JARVIS darf den Vault lesen, aber nicht
     # aendern - die Werkzeuge dafuer tauchen dann nicht einmal in tools/list auf.
     writable: ${OBSIDIAN_WRITABLE:true}
+    # Der einzige Teil von root, in dem geschrieben werden darf (relativ dazu). Gelesen wird
+    # ueberall, geschrieben nur hier - der Rest ist zusaetzlich nur lesend eingehaengt.
+    write-subpath: ${OBSIDIAN_WRITE_SUBPATH:}
+    # Ordner, die auch lesend gesperrt bleiben, kommagetrennt (z. B. Privates).
+    deny: ${OBSIDIAN_DENY:}
     # Obergrenze fuer den Text einer gelesenen Notiz; sie landet im Kontextfenster des Modells.
     max-note-chars: ${OBSIDIAN_MAX_NOTE_CHARS:60000}
     max-results: ${OBSIDIAN_MAX_RESULTS:40}

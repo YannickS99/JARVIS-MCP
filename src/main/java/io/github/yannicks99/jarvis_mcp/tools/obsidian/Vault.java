@@ -87,6 +87,7 @@ class Vault {
             return entries.filter(Files::isRegularFile)
                     .filter(Vault::isNote)
                     .filter(file -> !hidden(directory, file))
+                    .filter(file -> !VaultPath.denied(root(), file, properties.deniedFolders()))
                     .sorted(Comparator.comparing(Path::toString))
                     .limit(properties.maxResults())
                     .map(this::info)
@@ -140,7 +141,7 @@ class Vault {
 
     /** Legt eine neue Notiz an; eine bestehende wird nicht ueberschrieben. */
     String create(String path, String content) {
-        Path file = VaultPath.resolve(root(), path, true);
+        Path file = writable(VaultPath.resolve(root(), path, true));
         if (Files.exists(file)) {
             throw new ObsidianException(("\"%s\" gibt es bereits. Zum Ergaenzen append_note "
                     + "verwenden, zum Ueberarbeiten replace_section.").formatted(path));
@@ -156,7 +157,7 @@ class Vault {
 
     /** Haengt an eine bestehende Notiz an - mit Leerzeile dazwischen, damit Bloecke getrennt bleiben. */
     String append(String path, String content) {
-        Path file = file(path);
+        Path file = writable(file(path));
         String existing = readText(file);
         String separator = existing.isBlank() || existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
         backup(file, existing);
@@ -174,7 +175,7 @@ class Vault {
      *              geaendert und es wird nichts ueberschrieben
      */
     String replaceSection(String path, String heading, String content, String stand) {
-        Path file = file(path);
+        Path file = writable(file(path));
         String existing = readText(file);
         requireUnchanged(path, existing, stand);
 
@@ -209,8 +210,17 @@ class Vault {
         return properties.root();
     }
 
+    /** Der Pfad, sofern er im beschreibbaren Teil liegt - sonst mit Hinweis abgelehnt. */
+    private Path writable(Path file) {
+        VaultPath.ensureWritable(root(), properties.writeRoot(), file);
+        return file;
+    }
+
     private Path file(String path) {
         Path file = VaultPath.resolve(root(), path, true);
+        if (VaultPath.denied(root(), file, properties.deniedFolders())) {
+            throw new ObsidianException("\"%s\" liegt in einem gesperrten Ordner.".formatted(path));
+        }
         if (!Files.isRegularFile(file)) {
             throw new ObsidianException(("Die Notiz \"%s\" gibt es nicht - mit list_notes oder "
                     + "search_notes nachsehen, wie sie wirklich heisst.").formatted(path));
@@ -291,6 +301,7 @@ class Vault {
             return entries.filter(Files::isRegularFile)
                     .filter(Vault::isNote)
                     .filter(file -> !hidden(directory, file))
+                    .filter(file -> !VaultPath.denied(root(), file, properties.deniedFolders()))
                     .sorted(Comparator.comparing(Path::toString))
                     .map(this::info)
                     .toList();

@@ -2,6 +2,9 @@ package io.github.yannicks99.jarvis_mcp.tools.obsidian;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -23,6 +26,14 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *                      Absicherung.
  * @param writable      Ob schreibende Werkzeuge angeboten werden. Getrennt vom Zuschalten des
  *                      Moduls, damit sich der Vault auch nur lesend anbinden laesst.
+ * @param writeSubpath  Der einzige Teil von {@code root}, in dem geschrieben werden darf, relativ
+ *                      dazu (z. B. {@code JARVIS/JARVIS 3.0/JARVIS-Obsidian}). Leer bedeutet: im
+ *                      ganzen eingehaengten Bereich. Gelesen wird ueberall, geschrieben nur hier -
+ *                      genau die Aufteilung aus Abschnitt 6 des Katalogs ({@code read_roots} /
+ *                      {@code write_roots}). Zusaetzlich ist der Rest im Container nur lesend
+ *                      eingehaengt, siehe {@code docker-compose.yml}.
+ * @param deny          Ordner, die auch lesend nicht zugaenglich sind, kommagetrennt - fuer
+ *                      Privates, das die KI nichts angeht.
  * @param maxNoteChars  Obergrenze fuer den Text, den {@code read_note} zurueckgibt. Eine Notiz
  *                      landet im Kontextfenster des Sprachmodells; eine ueberlange wird gekuerzt
  *                      statt abgelehnt, mit sichtbarem Hinweis.
@@ -34,6 +45,8 @@ public record ObsidianProperties(
         @DefaultValue("false") boolean enabled,
         @DefaultValue("/srv/vault") Path root,
         @DefaultValue("true") boolean writable,
+        @DefaultValue("") String writeSubpath,
+        @DefaultValue("") String deny,
         @DefaultValue("60000") int maxNoteChars,
         @DefaultValue("40") int maxResults,
         @DefaultValue("240") int snippetChars) {
@@ -41,5 +54,18 @@ public record ObsidianProperties(
     /** Ohne vorhandenen Ordner kann kein einziger Aufruf gelingen. */
     public boolean usable() {
         return Files.isDirectory(root);
+    }
+
+    /** Der Ordner, in dem geschrieben werden darf - ohne Angabe der ganze eingehaengte Bereich. */
+    public Path writeRoot() {
+        return writeSubpath.isBlank() ? root : root.resolve(writeSubpath).normalize();
+    }
+
+    /** Die gesperrten Ordner, leer wenn nichts eingetragen ist. */
+    public Set<String> deniedFolders() {
+        return Arrays.stream(deny.split(","))
+                .map(String::strip)
+                .filter(entry -> !entry.isEmpty())
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

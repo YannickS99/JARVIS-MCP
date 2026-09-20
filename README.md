@@ -62,10 +62,16 @@ eingehängten Vault-Ordner erscheinen die Werkzeuge gar nicht erst in `tools/lis
 | `append_note` | `path`, `content` | Hängt Text ans Ende einer Notiz an |
 | `replace_section` | `path`, `heading`, `content`, `stand` | Ersetzt den Inhalt eines Abschnitts, die Überschrift bleibt stehen |
 
-**Der Zugriff ist doppelt begrenzt.** In den Container kommt nur der freigegebene Ordner
-(`OBSIDIAN_DIR` → `/srv/vault`), nicht die Vault-Wurzel — was dort nicht eingehängt ist, existiert
-im Container nicht. Darüber liegt die Pfadprüfung: `..`, absolute Pfade, versteckte Ordner und
-symbolische Verknüpfungen nach draußen werden abgewiesen, bevor irgendetwas geöffnet wird.
+**Lesen weit, schreiben eng.** Der Vault kommt als Ganzes herein, aber **nur lesend**
+(`OBSIDIAN_VAULT_DIR` → `/srv/vault:ro`): JARVIS soll den Zusammenhang kennen — die Übersichten,
+die anderen Kataloge. Beschreibbar ist allein der Ordner aus `OBSIDIAN_WRITE_SUBPATH`, der
+zusätzlich darüber eingehängt wird. Das ist die Aufteilung `read_roots`/`write_roots` aus
+Abschnitt 6 des Katalogs, und sie ist doppelt abgesichert: Der Code weist einen Schreibversuch
+außerhalb mit einem Hinweis ab, und selbst wenn er es nicht täte, ließe der Kernel ihn nicht zu.
+
+Dazu die Pfadprüfung: `..`, absolute Pfade, versteckte Ordner und symbolische Verknüpfungen nach
+draußen werden abgewiesen, bevor irgendetwas geöffnet wird. Was privat bleiben soll, kommt in
+`OBSIDIAN_DENY` — diese Ordner sind auch lesend nicht zugänglich und tauchen in keiner Liste auf.
 
 **Geschrieben wird ohne Rückfrage, aber nicht ohne Netz.** Eine Bestätigung vor jeder Änderung wäre
 im Gespräch nur lästig; stattdessen gilt dreierlei: Jede Änderung legt die **Vorgängerfassung** in

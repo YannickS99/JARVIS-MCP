@@ -32,15 +32,20 @@ public class ObsidianConfiguration {
             log.warn("Obsidian-Modul ist aktiv, aber {} ist kein Ordner - die Werkzeuge werden bei "
                             + "jedem Aufruf scheitern. Ist der Vault-Ordner in den Container eingehaengt?",
                     properties.root());
-        } else if (properties.writable() && !Files.isWritable(properties.root())) {
+        } else if (properties.writable() && !Files.isWritable(properties.writeRoot())) {
             // Der haeufigste Fall: Der Container laeuft unter einer anderen Kennung als der, der die
-            // Dateien gehoeren (im Vault-Ordner auf JARVIS ist das 1000:1000).
+            // Dateien gehoeren (im Vault auf JARVIS ist das 1000:1000).
             log.warn("Obsidian-Modul darf schreiben, aber {} ist fuer diesen Benutzer nicht "
-                            + "beschreibbar - in der docker-compose.yml user: \"1000:1000\" setzen.",
-                    properties.root());
+                            + "beschreibbar - in der docker-compose.yml user: \"1000:1000\" setzen "
+                            + "und pruefen, ob der Ordner beschreibbar eingehaengt ist.",
+                    properties.writeRoot());
         } else {
-            log.info("Obsidian-Modul aktiv: {} ({})", properties.root(),
-                    properties.writable() ? "lesen und schreiben" : "nur lesen");
+            log.info("Obsidian-Modul aktiv: liest {}, schreibt {}{}",
+                    properties.root(),
+                    properties.writable() ? properties.writeRoot() : "nichts",
+                    properties.deniedFolders().isEmpty()
+                            ? ""
+                            : " (gesperrt: " + String.join(", ", properties.deniedFolders()) + ")");
         }
         return new Vault(properties);
     }

@@ -46,6 +46,10 @@ services:
       # sieht den Ordner immer unter /srv/vault, egal wo er auf dem Host liegt.
       OBSIDIAN_ENABLED: ${OBSIDIAN_ENABLED:-false}
       OBSIDIAN_WRITABLE: ${OBSIDIAN_WRITABLE:-true}
+      # Der einzige Teil des Vaults, in dem JARVIS schreiben darf - relativ zur Vault-Wurzel.
+      OBSIDIAN_WRITE_SUBPATH: ${OBSIDIAN_WRITE_SUBPATH:-}
+      # Ordner, die auch lesend gesperrt bleiben (kommagetrennt).
+      OBSIDIAN_DENY: ${OBSIDIAN_DENY:-}
       TZ: ${TZ:-Europe/Berlin}
     # Der Vault gehoert auf JARVIS dem Benutzer 1000:1000, und seine Ordner geben "anderen" keinen
     # Zugriff (drwxrwx---). Das Image legt sich einen eigenen Benutzer an (1001) - damit kaeme der
@@ -57,10 +61,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # Nur der freigegebene Teil des Vaults, nicht dessen Wurzel: Was hier nicht eingehaengt ist,
-      # existiert im Container nicht und ist auch bei einem Fehler im Code nicht zu erreichen.
-      # In der Testphase ist das ein einzelner Ordner - siehe .env.example.
-      - "${OBSIDIAN_DIR:-/dev/null}:/srv/vault"
+      # Der Vault, bewusst zweigeteilt (Katalog JARVIS-Obsidian, Abschnitt 6):
+      #
+      # 1. Die Wurzel kommt **nur lesend** herein. JARVIS soll den Zusammenhang kennen - die
+      #    Uebersichten, die anderen Kataloge -, aber nichts davon aendern koennen. Das ":ro"
+      #    ist die zweite Ebene unter der Pfadpruefung im Code: Selbst ein Fehler dort kann
+      #    ausserhalb des Schreibordners nichts anrichten, der Kernel laesst es nicht zu.
+      - "${OBSIDIAN_VAULT_DIR:-/dev/null}:/srv/vault:ro"
+      # 2. Darueber der eine Ordner, in dem geschrieben werden darf. Ein Mount innerhalb eines
+      #    Mounts ist zulaessig; Docker haengt den laengeren Pfad zuletzt ein.
+      - "${OBSIDIAN_VAULT_DIR:-/dev/null}/${OBSIDIAN_WRITE_SUBPATH:-.}:/srv/vault/${OBSIDIAN_WRITE_SUBPATH:-.}"
     networks:
       # Eigenes Netz fuer diesen Stack ...
       - default
