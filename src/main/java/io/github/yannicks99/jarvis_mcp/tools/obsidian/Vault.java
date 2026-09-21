@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +59,23 @@ class Vault {
     record NoteInfo(String path, long bytes, Instant modified) {
     }
 
-    record SearchHit(String path, int line, String snippet) {
+    /**
+     * Wie stark ein Treffer fuer seine Notiz spricht - in genau dieser Reihenfolge wird sortiert.
+     * Wer nach "Monetheus" sucht, meint eher die Notiz, die so heisst, als eine, die den Namen im
+     * Fliesstext erwaehnt.
+     */
+    enum Relevance {
+        FILENAME, HEADING, CONTENT
+    }
+
+    record SearchHit(String path, int line, String snippet, Relevance relevance) {
+    }
+
+    /**
+     * Die angezeigten Treffer und wie viele es insgesamt gab - die Differenz wird der KI genannt,
+     * damit sie eine gekuerzte Liste nicht fuer das vollstaendige Bild haelt.
+     */
+    record SearchResult(List<SearchHit> hits, int total) {
     }
 
     // ------------------------------------------------------------------ lesen
@@ -103,8 +120,15 @@ class Vault {
      * <p>Fuer einen Ordner dieser Groesse ist das schnell genug, und es hat gegenueber einem Index
      * den Vorteil, dass nichts veralten kann: Was gerade in Obsidian geschrieben wurde, ist sofort
      * auffindbar.
+     *
+     * <p>Zwei Eigenschaften sind Absicht. Je Notiz entsteht <strong>ein</strong> Treffer - die KI
+     * liest die Notiz ohnehin als Ganzes, und zwei Zeilen derselben Datei sahen im Ergebnis aus wie
+     * zwei Notizen. Und <strong>gekuerzt wird erst nach der Sortierung</strong>: Der fruehere
+     * Abbruch bei erreichter Obergrenze lieferte die ersten Notizen der Ordnerreihenfolge statt der
+     * passendsten - eine Suche nach "Monetheus" fand so jede Unterakte, aber nicht die
+     * Uebersichtsnotiz, die genau so heisst.
      */
-    List<SearchHit> search(String query, String folder) {
+    SearchResult search(String query, String folder) {
         if (query == null || query.isBlank()) {
             throw new ObsidianException("Es fehlt der Suchbegriff.");
         }
@@ -112,29 +136,43 @@ class Vault {
         List<SearchHit> hits = new ArrayList<>();
 
         for (NoteInfo note : listAll(folder)) {
-            Path file = file(note.path());
             List<String> lines;
             try {
-                lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                lines = Files.readAllLines(file(note.path()), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 log.warn("Notiz {} liess sich bei der Suche nicht lesen: {}", note.path(), e.getMessage());
                 continue;
             }
-            // Auch der Dateiname zaehlt: Wer nach "Satellite" sucht, meint oft die Notiz selbst.
-            if (note.path().toLowerCase(Locale.GERMAN).contains(needle)) {
-                hits.add(new SearchHit(note.path(), 0, firstLine(lines)));
+            bestHit(note.path(), lines, needle).ifPresent(hits::add);
+        }
+
+        hits.sort(Comparator.comparing(SearchHit::relevance).thenComparing(SearchHit::path));
+        return new SearchResult(hits.stream().limit(properties.maxResults()).toList(), hits.size());
+    }
+
+    /** Der aussagekraeftigste Treffer einer einzelnen Notiz, oder keiner. */
+    private Optional<SearchHit> bestHit(String path, List<String> lines, String needle) {
+        // Auch der Dateiname zaehlt: Wer nach "Satellite" sucht, meint oft die Notiz selbst.
+        if (path.toLowerCase(Locale.GERMAN).contains(needle)) {
+            return Optional.of(new SearchHit(path, 0, firstLine(lines), Relevance.FILENAME));
+        }
+
+        SearchHit imText = null;
+        for (int index = 0; index < lines.size(); index++) {
+            String line = lines.get(index);
+            if (!line.toLowerCase(Locale.GERMAN).contains(needle)) {
+                continue;
             }
-            for (int index = 0; index < lines.size() && hits.size() < properties.maxResults(); index++) {
-                if (lines.get(index).toLowerCase(Locale.GERMAN).contains(needle)) {
-                    hits.add(new SearchHit(note.path(), index + 1, snippet(lines.get(index))));
-                    break;  // Eine Fundstelle je Notiz reicht, um sie zum Lesen vorzuschlagen.
-                }
+            // Eine Ueberschrift benennt das Thema eines Abschnitts, eine Fliesstextzeile erwaehnt es
+            // nur - deshalb schlaegt sie einen frueheren Treffer im Text.
+            if (line.stripLeading().startsWith("#")) {
+                return Optional.of(new SearchHit(path, index + 1, snippet(line), Relevance.HEADING));
             }
-            if (hits.size() >= properties.maxResults()) {
-                break;
+            if (imText == null) {
+                imText = new SearchHit(path, index + 1, snippet(line), Relevance.CONTENT);
             }
         }
-        return hits;
+        return Optional.ofNullable(imText);
     }
 
     // --------------------------------------------------------------- schreiben

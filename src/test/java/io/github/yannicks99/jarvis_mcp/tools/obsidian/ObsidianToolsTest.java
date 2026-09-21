@@ -110,6 +110,49 @@ class ObsidianToolsTest {
         assertThat(tools.searchNotes("Rollladen", null)).contains("Keine Notiz");
     }
 
+    @Test
+    @DisplayName("search_notes nennt je Notiz eine Fundstelle, die passendste Notiz zuerst")
+    void ranksAndDeduplicates() throws IOException {
+        Files.writeString(root.resolve("Anforderungen/Wohnzimmer.md"), "Erwaehnt Satelliten nebenbei.\n");
+
+        String answer = tools.searchNotes("Satelliten", null);
+
+        // Die Notiz, die so heisst, steht vor der, die den Begriff nur im Fliesstext erwaehnt.
+        assertThat(answer.indexOf("Anforderungen/Satelliten.md"))
+                .isLessThan(answer.indexOf("Anforderungen/Wohnzimmer.md"));
+        // "Satelliten" steht im Dateinamen UND in der Ueberschrift - trotzdem nur eine Zeile.
+        assertThat(answer.lines().filter(line -> line.contains("Satelliten.md"))).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Eine Ueberschrift schlaegt eine frueher gefundene Fliesstextzeile")
+    void prefersHeadingOverBody() throws IOException {
+        Files.writeString(root.resolve("Notizen.md"), """
+                Kurz zur Hardware, mehr weiter unten.
+
+                ## Hardware
+
+                Raspberry Pi 4.
+                """);
+
+        assertThat(tools.searchNotes("hardware", null)).contains("Notizen.md, Zeile 3");
+    }
+
+    @Test
+    @DisplayName("Eine gekuerzte Trefferliste sagt es - und enthaelt trotzdem die passendste Notiz")
+    void reportsTruncation() throws IOException {
+        for (int i = 0; i < 5; i++) {
+            Files.writeString(root.resolve("Streu-%d.md".formatted(i)), "Satelliten am Rande erwaehnt.\n");
+        }
+        ObsidianTools zwei = new ObsidianTools(
+                new Vault(new ObsidianProperties(true, root, true, "", "", 60_000, 2, 240)));
+
+        String answer = zwei.searchNotes("Satelliten", null);
+
+        assertThat(answer).contains("Anforderungen/Satelliten.md");
+        assertThat(answer).contains("2 wichtigsten von 6 Notizen");
+    }
+
     // --------------------------------------------------------------- schreiben
 
     @Test
