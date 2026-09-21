@@ -93,10 +93,13 @@ public class ObsidianTools {
                     destructiveHint = false, openWorldHint = false),
             description = """
                     Durchsucht die Notizen im freigegebenen Bereich nach einem Begriff und \
-                    nennt Pfad, Zeile und die Fundstelle. Dafuer, wenn der Pfad einer Notiz \
-                    nicht bekannt ist oder nachgesehen werden soll, wo ein Thema schon einmal \
-                    vorkommt. Gesucht wird im Text und im Dateinamen, Gross- und Kleinschreibung \
-                    spielt keine Rolle. Anschliessend die gefundene Notiz mit read_note lesen.""")
+                    nennt je Notiz eine Fundstelle mit Pfad und Zeile, die wichtigste zuerst \
+                    (Dateiname vor Ueberschrift vor Fliesstext). Dafuer, wenn der Pfad einer \
+                    Notiz nicht bekannt ist oder nachgesehen werden soll, wo ein Thema schon \
+                    einmal vorkommt. Gesucht wird im Text und im Dateinamen, Gross- und \
+                    Kleinschreibung spielt keine Rolle. Das Ergebnis nennt nur Fundstellen und \
+                    keinen Inhalt: Anschliessend die passendste Notiz mit read_note lesen, bevor \
+                    du die Frage beantwortest.""")
     public String searchNotes(
             @McpToolParam(required = true, description = "Suchbegriff, z. B. \"Satellite\".")
             String query,
@@ -104,16 +107,24 @@ public class ObsidianTools {
                     description = "Optional: Unterordner, in dem gesucht wird.")
             String folder) {
 
-        List<Vault.SearchHit> hits = vault.search(query, folder);
+        Vault.SearchResult result = vault.search(query, folder);
+        List<Vault.SearchHit> hits = result.hits();
         if (hits.isEmpty()) {
             return "Keine Notiz enthaelt \"%s\".".formatted(query);
         }
 
-        StringBuilder answer = new StringBuilder("%d Fundstelle(n) fuer \"%s\":%n".formatted(hits.size(), query));
+        StringBuilder answer = new StringBuilder(
+                "%d Notiz(en) mit \"%s\", die wichtigste zuerst:%n".formatted(hits.size(), query));
         for (Vault.SearchHit hit : hits) {
             answer.append(hit.line() == 0
                     ? "- %s (Dateiname): %s%n".formatted(hit.path(), hit.snippet())
                     : "- %s, Zeile %d: %s%n".formatted(hit.path(), hit.line(), hit.snippet()));
+        }
+        // Ohne diesen Hinweis haelt die KI eine gekuerzte Liste fuer das vollstaendige Bild.
+        if (result.total() > hits.size()) {
+            answer.append(("%nDas sind die %d wichtigsten von %d Notizen. Fuer die uebrigen den "
+                    + "Suchbegriff praezisieren oder einen Ordner angeben.%n")
+                    .formatted(hits.size(), result.total()));
         }
         return answer.toString();
     }

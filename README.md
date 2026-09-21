@@ -57,10 +57,19 @@ eingehängten Vault-Ordner erscheinen die Werkzeuge gar nicht erst in `tools/lis
 |---|---|---|
 | `read_note` | `path` | Gibt den Markdown-Text einer Notiz zurück, dazu ihren „Stand" |
 | `list_notes` | `folder` (optional) | Listet die Notizen mit Pfad, Größe und letzter Änderung |
-| `search_notes` | `query`, `folder` (optional) | Volltextsuche über Text und Dateinamen, nennt Pfad und Fundstelle |
+| `search_notes` | `query`, `folder` (optional) | Volltextsuche über Text und Dateinamen, je Notiz eine Fundstelle, die wichtigste zuerst |
 | `create_note` | `path`, `content` | Legt eine neue Notiz an; eine bestehende wird nie überschrieben |
 | `append_note` | `path`, `content` | Hängt Text ans Ende einer Notiz an |
 | `replace_section` | `path`, `heading`, `content`, `stand` | Ersetzt den Inhalt eines Abschnitts, die Überschrift bleibt stehen |
+
+**Die Suche rankt, bevor sie kürzt.** Je Notiz entsteht genau ein Treffer — zwei Zeilen
+derselben Datei sahen im Ergebnis aus wie zwei Notizen, und das Modell hat diese Doppelung
+prompt in seine Antwort übernommen. Sortiert wird nach Dateiname, dann Überschrift, dann
+Fließtext, und **erst danach** wird auf `jarvis-mcp.obsidian.max-results` gekürzt. Vorher brach
+die Suche beim Erreichen der Obergrenze mitten im Vault ab und lieferte die ersten Notizen der
+Ordnerreihenfolge statt der passendsten: Eine Suche nach „Monetheus" fand so jede Unterakte,
+aber nicht die Übersichtsnotiz, die genau so heißt. Ist gekürzt worden, sagt das Ergebnis es
+dazu — sonst hält das Modell die Liste für vollständig.
 
 **Lesen weit, schreiben eng.** Der Vault kommt als Ganzes herein, aber **nur lesend**
 (`OBSIDIAN_VAULT_DIR` → `/srv/vault:ro`): JARVIS soll den Zusammenhang kennen — die Übersichten,
