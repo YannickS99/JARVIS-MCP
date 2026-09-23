@@ -47,7 +47,11 @@ class HomeAssistantResourcesTest {
                 List.of("light.", "script.", "scene."), Duration.ofMinutes(5), Duration.ofSeconds(5));
         RefreshingCache<AreaResolver.AreaIndex> areas = new RefreshingCache<>("Bereiche",
                 () -> AreaResolver.AreaIndex.of(client.areas()), Duration.ofMinutes(5), Duration.ofSeconds(5));
-        return new HomeAssistantResources(index, new AreaResolver(areas, configured), JsonMapper.builder().build());
+        RefreshingCache<IdempotentEntities> idempotent = new RefreshingCache<>("Label",
+                () -> new IdempotentEntities(client.labeledEntities(IdempotentEntities.LABEL)),
+                Duration.ofMinutes(5), Duration.ofSeconds(5));
+        return new HomeAssistantResources(index, new AreaResolver(areas, configured), idempotent,
+                JsonMapper.builder().build());
     }
 
     @Test
@@ -98,5 +102,39 @@ class HomeAssistantResourcesTest {
         assertThat(resources(List.of()).areasAndEntities())
                 .startsWith("{\"entities\":[")
                 .contains("{\"type\":\"light\",\"name\":\"Stehlampe\",\"ref\":\"light.stehlampe\",\"aliases\":[]}");
+    }
+
+    @Test
+    @DisplayName("eine Routine mit dem Label jarvis-idempotent traegt die Zusage, alle anderen nicht")
+    void marksLabeledEntitiesAsIdempotent() {
+        homeAssistant.labeled("script.gute_nacht");
+
+        EntityCatalog catalog = resources(List.of()).catalog();
+
+        assertThat(catalog.entities()).contains(
+                new EntityCatalog.Entry("routine", "Gute Nacht", "script.gute_nacht", List.of(), true),
+                new EntityCatalog.Entry("routine", "Kinoabend", "scene.kino", List.of(), false));
+    }
+
+    @Test
+    @DisplayName("die Zusage steht nur im JSON, wenn sie gegeben ist")
+    void rendersIdempotentOnlyWhenSet() {
+        homeAssistant.labeled("script.gute_nacht");
+
+        assertThat(resources(List.of()).areasAndEntities())
+                .contains("{\"type\":\"routine\",\"name\":\"Gute Nacht\",\"ref\":\"script.gute_nacht\","
+                        + "\"aliases\":[],\"idempotent\":true}")
+                .contains("{\"type\":\"routine\",\"name\":\"Kinoabend\",\"ref\":\"scene.kino\",\"aliases\":[]}");
+    }
+
+    @Test
+    @DisplayName("ist das Label nicht lesbar, kommt der Katalog trotzdem - nur ohne Zusagen")
+    void catalogSurvivesUnreadableLabel() {
+        homeAssistant.labeled("script.gute_nacht");
+        homeAssistant.labelsStatus(400);
+
+        EntityCatalog catalog = resources(List.of()).catalog();
+
+        assertThat(catalog.entities()).isNotEmpty().noneMatch(EntityCatalog.Entry::idempotent);
     }
 }

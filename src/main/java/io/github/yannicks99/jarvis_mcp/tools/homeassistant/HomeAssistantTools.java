@@ -20,11 +20,16 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
  * "Werkzeug kaputt" ankommt. Geworfen wird nur, wenn Home Assistant selbst nicht mitspielt.
  *
  * <p>Jedes Werkzeug traegt die MCP-{@code ToolAnnotations} (Anforderungskatalog JARVIS-SemanticCache,
- * Abschnitt 4). Der JARVIS-AIService liest daraus, welche Werkzeuge er ohne erneute Rueckfrage beim
- * Sprachmodell wiederholen darf: nur zustandsveraendernde, die bei wiederholter Ausfuehrung nichts
- * anderes bewirken ({@code idempotentHint = true}, {@code readOnlyHint = false}). Die Hinweise sind
- * damit keine Dokumentation, sondern steuern Verhalten - eine falsche Angabe hier fuehrt dort zu einer
- * falsch zwischengespeicherten Aktion.
+ * Abschnitt 4, und JARVIS-CacheDifferenzierung). Der JARVIS-AIService liest daraus, welche Werkzeuge
+ * er ohne erneute Rueckfrage beim Sprachmodell ausfuehren darf (alle mit {@code readOnlyHint = false}),
+ * ob er dazu gelernte Antworten wiederverwenden darf und ob er einen Aufruf nach einem
+ * Verbindungsabbruch wiederholen darf (beides nur mit {@code idempotentHint = true}). Die Hinweise
+ * sind damit keine Dokumentation, sondern steuern Verhalten - eine falsche Angabe hier fuehrt dort zu
+ * einer doppelt ausgefuehrten Aktion oder einer Antwort, die nicht stimmt.
+ *
+ * <p>Die Parameter, die einen Namen entgegennehmen, heissen wie die Typen im Entity-Katalog
+ * ({@link HomeAssistantResources}). Daran prueft der AIService, dass das Sprachmodell einen Namen der
+ * richtigen Art uebergeben hat, bevor er einen Aufruf lernt.
  */
 public class HomeAssistantTools {
 
@@ -110,7 +115,11 @@ public class HomeAssistantTools {
 
     // Bewusst nicht idempotent: Szenen und Skripte werden in Home Assistant frei definiert und
     // garantieren keine reine Zustandssetzung - ein Skript darf etwa etwas umschalten. Wer eine
-    // Routine erneut ausloest, bekommt unter Umstaenden nicht dasselbe Ergebnis.
+    // Routine erneut ausloest, bekommt unter Umstaenden nicht dasselbe Ergebnis. Fuer einzelne
+    // Routinen sagt das Label jarvis-idempotent es trotzdem zu (siehe IdempotentEntities).
+    //
+    // Die Rueckgaben mit echten Umlauten: Ohne Idempotenz-Zusage spricht der AIService sie
+    // unveraendert als Antwort, statt sie vom Sprachmodell umformulieren zu lassen.
     @McpTool(name = "run_ha_routine",
             annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = false,
                     destructiveHint = true, openWorldHint = false),
@@ -122,24 +131,24 @@ public class HomeAssistantTools {
     public String runRoutine(
             @McpToolParam(required = true,
                     description = "Name der Routine, so wie sie in Home Assistant heisst, z. B. \"Gute Nacht\".")
-            String name) {
+            String routine) {
 
-        return switch (index.find(name, ROUTINES)) {
+        return switch (index.find(routine, ROUTINES)) {
             case EntityLookup.Found(HomeAssistantEntity entity) -> {
                 // Szenen und Skripte sind zwei Domains mit demselben Dienstnamen - welcher es ist,
                 // steht in der entity_id.
                 String domain = entity.entityId().startsWith(SCRIPT_DOMAIN) ? "script" : "scene";
                 client.callService(domain, "turn_on", Map.of("entity_id", entity.entityId()));
                 log.info("Routine {} ({}) ausgeloest", entity.name(), entity.entityId());
-                yield "Die Routine '%s' wurde ausgeloest.".formatted(entity.name());
+                yield "Die Routine '%s' wurde ausgelöst.".formatted(entity.name());
             }
             case EntityLookup.NotFound(List<String> available) -> available.isEmpty()
-                    ? "In Home Assistant ist keine Routine mit dem Namen '%s' hinterlegt.".formatted(name)
-                    : "Es gibt keine Routine namens '%s'. Verfuegbar sind: %s."
-                            .formatted(name, String.join(", ", available));
+                    ? "In Home Assistant ist keine Routine mit dem Namen '%s' hinterlegt.".formatted(routine)
+                    : "Es gibt keine Routine namens '%s'. Verfügbar sind: %s."
+                            .formatted(routine, String.join(", ", available));
             case EntityLookup.Ambiguous(List<String> candidates) ->
                     "'%s' passt auf mehrere Routinen: %s. Bitte eine davon genau benennen."
-                            .formatted(name, String.join(", ", candidates));
+                            .formatted(routine, String.join(", ", candidates));
         };
     }
 

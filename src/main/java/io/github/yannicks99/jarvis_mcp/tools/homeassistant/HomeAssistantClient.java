@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import tools.jackson.core.JsonParser;
@@ -104,6 +105,25 @@ public class HomeAssistantClient {
      */
     public List<HomeAssistantLightStatus> lightStates() {
         return parseLightStates(renderTemplate(LIGHT_STATES_TEMPLATE));
+    }
+
+    /**
+     * Die {@code entity_id}s aller Entitaeten mit einem bestimmten Label.
+     *
+     * <p>Labels haben wie die Bereiche keinen REST-Endpunkt, wohl aber eine Template-Funktion.
+     * Ein Label, das es in Home Assistant nicht gibt, ergibt eine leere Liste und keinen Fehler.
+     *
+     * @param label Name oder Kennung des Labels; nur feste Werte aus dem Code, er landet
+     *              unmaskiert im Template
+     */
+    public Set<String> labeledEntities(String label) {
+        String rendered = renderTemplate("{{ label_entities('%s') | to_json }}".formatted(label));
+        try {
+            return Set.copyOf(jsonMapper.readValue(rendered, new TypeReference<List<String>>() { }));
+        } catch (RuntimeException ex) {
+            throw new HomeAssistantException(
+                    "Unerwartete Antwort auf /api/template: " + rendered.strip(), ex);
+        }
     }
 
     /** Schickt ein Jinja-Template an Home Assistant und gibt das Ergebnis unveraendert zurueck. */

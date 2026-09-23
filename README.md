@@ -21,7 +21,7 @@ LLM → MCP-Werkzeug set_application_power  → JARVIS-MCP → Monitoring-Tool-R
 |---|---|---|
 | `set_area_lights_power` | `area`, `power` | Schaltet alle Lichter eines Bereichs an/aus |
 | `set_light_power` | `light`, `power` | Schaltet ein einzelnes Licht über seinen Anzeigenamen |
-| `run_ha_routine` | `name` | Löst eine Home-Assistant-Szene oder ein -Skript aus |
+| `run_ha_routine` | `routine` | Löst eine Home-Assistant-Szene oder ein -Skript aus |
 | `get_lights_status` | `area` (optional) | Sagt, welche Lichter gerade an sind — im ganzen Haus oder in einem Bereich |
 | `get_light_status` | `light` | Sagt, ob ein einzelnes Licht an oder aus ist |
 
@@ -117,7 +117,9 @@ Kilobyte von `/api/states`. Ein Licht, das Home Assistant als `unavailable` meld
 genannt statt stillschweigend als „aus" gezählt.
 
 Neue „Protokolle" entstehen rein in Home Assistant: Wer dort eine Szene oder ein Skript anlegt,
-kann es sofort über `run_ha_routine` ansprechen — an JARVIS-MCP ist dafür nichts zu ändern.
+kann es sofort über `run_ha_routine` ansprechen — an JARVIS-MCP ist dafür nichts zu ändern. Tut
+eine Routine bei jedem Auslösen garantiert dasselbe (etwa „Gute Nacht", anders als ein
+Garagentor-Toggle), bekommt sie in Home Assistant das Label **`jarvis-idempotent`** — siehe unten.
 
 ## Für den semantischen Cache des AIService
 
@@ -126,28 +128,41 @@ Befehlen das Sprachmodell und ruft das Werkzeug direkt auf (Anforderungskatalog
 **JARVIS-SemanticCache**). Zwei Dinge braucht er dafür von hier — beide über bestehende
 MCP-Mechanismen, damit er keine werkzeugspezifische Logik mitbringen muss.
 
-**1. Tool-Annotations: Was darf wiederholt werden?**
+**1. Tool-Annotations: Was darf aus dem Cache laufen, und was darf er dazu sagen?**
 
-Jedes Werkzeug trägt die MCP-Standardhinweise `readOnlyHint` und `idempotentHint`. Gecacht wird
-nur, was zustandsverändernd *und* idempotent ist:
+Jedes Werkzeug trägt die MCP-Standardhinweise `readOnlyHint` und `idempotentHint` (Anforderungskataloge
+**JARVIS-SemanticCache** und **JARVIS-CacheDifferenzierung**). Aus dem Cache ausgeführt wird alles,
+was zustandsverändernd ist — ausgeführt wird bei einem Treffer ohnehin live. `idempotentHint`
+entscheidet, woher dann die Antwort kommt:
 
-| Werkzeug | `readOnlyHint` | `idempotentHint` | cachebar |
-|---|---|---|---|
-| `set_area_lights_power` | `false` | `true` | ja |
-| `set_light_power` | `false` | `true` | ja |
-| `set_application_power` | `false` | `true` | ja |
-| `run_ha_routine` | `false` | `false` | nein |
-| `create_note`, `append_note`, `replace_section` | `false` | `false` | nein |
-| `get_lights_status`, `get_light_status`, `get_applications_status` | `true` | — | nein |
-| `read_note`, `list_notes`, `search_notes` | `true` | — | nein |
+| Werkzeug | `readOnlyHint` | `idempotentHint` | aus dem Cache | Antwort |
+|---|---|---|---|---|
+| `set_area_lights_power` | `false` | `true` | ja | gelernte Vorlage |
+| `set_light_power` | `false` | `true` | ja | gelernte Vorlage |
+| `set_application_power` | `false` | `true` | ja | gelernte Vorlage |
+| `run_ha_routine` | `false` | `false` | ja | Ergebnistext des Werkzeugs — Vorlage nur mit Label (s. u.) |
+| `create_note`, `append_note`, `replace_section` | `false` | `false` | (wird nie gelernt) | — |
+| `get_lights_status`, `get_light_status`, `get_applications_status` | `true` | — | nein | — |
+| `read_note`, `list_notes`, `search_notes` | `true` | — | nein | — |
 
-`run_ha_routine` ist bewusst konservativ: Szenen und Skripte werden in Home Assistant frei
-definiert und garantieren keine reine Zustandssetzung — ein Skript darf etwas umschalten. Diese
-Hinweise sind damit keine Dokumentation, sondern steuern Verhalten auf der anderen Seite.
+`run_ha_routine` ist bewusst nicht idempotent: Szenen und Skripte werden in Home Assistant frei
+definiert und garantieren keine reine Zustandssetzung — ein Skript darf etwas umschalten. Eine
+gelernte Antwort („Das Tor öffnet sich.") wäre beim nächsten Mal womöglich falsch, und das
+Sprachmodell nach der Ausführung noch einmal zu fragen, könnte die Routine ein zweites Mal auslösen.
+Deshalb spricht der AIService dann den Ergebnistext des Werkzeugs („Die Routine 'Garagentor' wurde
+ausgelöst.") — der sagt nur, was JARVIS-MCP wirklich weiß. Derselbe Hinweis entscheidet außerdem,
+ob der AIService einen Aufruf nach einem Verbindungsabbruch wiederholt. Die Hinweise sind damit
+keine Dokumentation, sondern steuern Verhalten auf der anderen Seite.
 
 Die schreibenden Obsidian-Werkzeuge sind aus demselben Grund nicht idempotent: Zweimal angehängt
-steht der Text zweimal da. Und die lesenden gehören nicht in einen Cache, weil eine gerade in
+steht der Text zweimal da. Gelernt werden sie trotzdem nie, weil ihre Argumente (Pfad, Text) aus
+keinem bekannten Namen stammen. Die lesenden gehören nicht in einen Cache, weil eine gerade in
 Obsidian geänderte Notiz sonst veraltet im Gespräch stünde.
+
+**Namensparameter heißen wie die Typen im Katalog** (`area`, `light`, `routine`, `application`).
+Daran prüft der AIService, dass das Sprachmodell einen Namen der richtigen Art übergeben hat, bevor
+er einen Aufruf lernt — ein `run_ha_routine(routine="Wohnzimmer")` wird nie zur Route. Ein neues
+Werkzeug, das einen Namen entgegennimmt, hält sich an diese Regel.
 
 **2. Entity-Resources: Wie heißen die Dinge?**
 
@@ -169,9 +184,26 @@ Beide liefern dasselbe Format mit dem MIME-Typ `application/vnd.jarvis.entities+
 ]}
 ```
 
-`type` heißt wie der Werkzeugparameter, der den Namen entgegennimmt (`area`, `light`,
+`type` heißt wie der Werkzeugparameter, der den Namen entgegennimmt (`area`, `light`, `routine`,
 `application`) — daran erkennt der AIService, welcher Name in welches Argument gehört, und lernt
 kein `set_light_power(light="Wohnzimmer")`, wenn „Wohnzimmer" ein Bereich ist.
+
+**Optional: `"idempotent": true` an einem Eintrag.** Sagt zu, dass genau dieser Eintrag bei jeder
+Auslösung dasselbe bewirkt, auch wenn das Werkzeug das allgemein nicht zusagt. Dann darf der
+AIService gelernte Antworten wiederverwenden — und zwar nur für genau diesen Eintrag: „Gute Nacht"
+und „Kinoabend" landen auf derselben Route, eine Antwort wie „Schlaf gut!" gehört aber nur zu
+einem. Fehlt das Feld, gilt der `idempotentHint` des Werkzeugs.
+
+```json
+{"type": "routine", "name": "Gute Nacht", "ref": "script.gute_nacht", "aliases": [], "idempotent": true}
+```
+
+Home Assistant setzt das Feld über das **Label `jarvis-idempotent`** (Einstellungen → Bereiche,
+Labels & Zonen → Labels, dann an Skript oder Szene hängen). JARVIS-MCP liest es über die
+Template-Engine (`label_entities`) im selben Takt wie Bereiche und Entitäten; beim Start steht im
+Log, an welchen Entitäten es hängt. Ist es nicht lesbar, kommt der Katalog ohne Zusagen — der
+sichere Stand. Ein neues Werkzeugmodul mit derselben Eigenschaft (Wirkung hängt vom konkreten
+Ziel ab, nicht vom Werkzeug) verwendet dasselbe Feld, statt im AIService Sonderlogik zu verlangen.
 
 **Der AIService sucht die Resources am MIME-Typ, nicht an der URI.** Ein neues Werkzeugmodul macht
 seine Namen also bekannt, indem es eine weitere solche Resource anbietet

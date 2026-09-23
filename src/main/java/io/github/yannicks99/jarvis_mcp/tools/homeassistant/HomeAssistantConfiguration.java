@@ -3,6 +3,7 @@ package io.github.yannicks99.jarvis_mcp.tools.homeassistant;
 import io.github.yannicks99.jarvis_mcp.common.RefreshingCache;
 import java.net.http.HttpClient;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -95,6 +96,15 @@ public class HomeAssistantConfiguration {
                 properties.cacheTtl(), properties.minRefreshInterval());
     }
 
+    /** Im selben Takt wie Bereiche und Entitaeten - ein Katalogabruf kostet so keinen Aufruf. */
+    @Bean
+    RefreshingCache<IdempotentEntities> homeAssistantIdempotentEntities(HomeAssistantClient client,
+            HomeAssistantProperties properties) {
+        return new RefreshingCache<>("Label " + IdempotentEntities.LABEL,
+                () -> new IdempotentEntities(client.labeledEntities(IdempotentEntities.LABEL)),
+                properties.cacheTtl(), properties.minRefreshInterval());
+    }
+
     @Bean
     AreaResolver areaResolver(RefreshingCache<AreaResolver.AreaIndex> areaIndex,
             HomeAssistantProperties properties) {
@@ -114,8 +124,8 @@ public class HomeAssistantConfiguration {
 
     @Bean
     HomeAssistantResources homeAssistantResources(HomeAssistantEntityIndex index, AreaResolver areas,
-            ObjectMapper jsonMapper) {
-        return new HomeAssistantResources(index, areas, jsonMapper);
+            RefreshingCache<IdempotentEntities> idempotent, ObjectMapper jsonMapper) {
+        return new HomeAssistantResources(index, areas, idempotent, jsonMapper);
     }
 
     /**
@@ -128,8 +138,8 @@ public class HomeAssistantConfiguration {
      */
     @Bean
     IndexWarmer indexWarmer(HomeAssistantEntityIndex entities,
-            RefreshingCache<AreaResolver.AreaIndex> areas) {
-        return new IndexWarmer(entities, areas);
+            RefreshingCache<AreaResolver.AreaIndex> areas, RefreshingCache<IdempotentEntities> idempotent) {
+        return new IndexWarmer(entities, areas, idempotent);
     }
 
     static class IndexWarmer {
@@ -138,10 +148,13 @@ public class HomeAssistantConfiguration {
 
         private final HomeAssistantEntityIndex entities;
         private final RefreshingCache<AreaResolver.AreaIndex> areas;
+        private final RefreshingCache<IdempotentEntities> idempotent;
 
-        IndexWarmer(HomeAssistantEntityIndex entities, RefreshingCache<AreaResolver.AreaIndex> areas) {
+        IndexWarmer(HomeAssistantEntityIndex entities, RefreshingCache<AreaResolver.AreaIndex> areas,
+                RefreshingCache<IdempotentEntities> idempotent) {
             this.entities = entities;
             this.areas = areas;
+            this.idempotent = idempotent;
         }
 
         @EventListener(ApplicationReadyEvent.class)
@@ -161,6 +174,16 @@ public class HomeAssistantConfiguration {
                 } catch (RuntimeException ex) {
                     warmLog.warn("Home Assistant ist nicht erreichbar - alle Werkzeuge werden "
                             + "scheitern, bis das behoben ist. Ursache: {}", ex.getMessage());
+                    return;
+                }
+                // Ein falsch geschriebenes Label faellt sonst nie auf: Es wirkt dann schlicht nicht.
+                try {
+                    Set<String> labeled = idempotent.get().entityIds();
+                    warmLog.info("Label {} an {} Entitaeten: {}", IdempotentEntities.LABEL,
+                            labeled.size(), labeled.isEmpty() ? "(keine)" : String.join(", ", labeled));
+                } catch (RuntimeException ex) {
+                    warmLog.warn("Label {} nicht lesbar - der AIService bekommt keine Idempotenz-Zusagen "
+                            + "fuer Routinen. Ursache: {}", IdempotentEntities.LABEL, ex.getMessage());
                 }
             });
         }
@@ -170,6 +193,7 @@ public class HomeAssistantConfiguration {
         void refresh() {
             entities.refreshQuietly();
             areas.refreshQuietly();
+            idempotent.refreshQuietly();
         }
     }
 }

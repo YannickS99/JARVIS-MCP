@@ -1,5 +1,6 @@
 package io.github.yannicks99.jarvis_mcp.common;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 
 /**
@@ -38,11 +39,21 @@ public record EntityCatalog(List<Entry> entities) {
      * @param ref     interne Kennung, z. B. {@code area_id} oder {@code entity_id}; {@code null},
      *                wenn es keine gibt
      * @param aliases weitere Namen, unter denen der Eintrag gemeint sein kann
+     * @param idempotent Zusage, dass genau dieser Eintrag bei jeder Ausloesung dasselbe bewirkt -
+     *                   auch wenn das Werkzeug, das ihn entgegennimmt, das allgemein nicht zusagt
+     *                   (Anforderungskatalog JARVIS-CacheDifferenzierung, 4). Der AIService darf
+     *                   dann gelernte Antworten wiederverwenden. Steht nur im JSON, wenn gesetzt:
+     *                   Fehlt es, gilt die Angabe des Werkzeugs.
      */
-    public record Entry(String type, String name, String ref, List<String> aliases) {
+    public record Entry(String type, String name, String ref, List<String> aliases,
+            @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean idempotent) {
 
         public Entry {
             aliases = aliases == null ? List.of() : List.copyOf(aliases);
+        }
+
+        public Entry(String type, String name, String ref, List<String> aliases) {
+            this(type, name, ref, aliases, false);
         }
     }
 }
