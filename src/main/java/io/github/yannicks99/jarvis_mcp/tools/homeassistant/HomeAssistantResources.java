@@ -2,12 +2,15 @@ package io.github.yannicks99.jarvis_mcp.tools.homeassistant;
 
 import io.github.yannicks99.jarvis_mcp.common.EntityCatalog;
 import io.github.yannicks99.jarvis_mcp.common.NameNormalizer;
+import io.github.yannicks99.jarvis_mcp.common.RefreshingCache;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpResource;
 import tools.jackson.databind.ObjectMapper;
 
@@ -23,21 +26,25 @@ import tools.jackson.databind.ObjectMapper;
  */
 public class HomeAssistantResources {
 
+    private static final Logger log = LoggerFactory.getLogger(HomeAssistantResources.class);
+
     static final String ENTITIES_URI = "homeassistant://areas-and-entities";
 
     /** Die Typen heissen wie die Werkzeugparameter, die den jeweiligen Namen entgegennehmen. */
     static final String AREA = "area";
     static final String LIGHT = "light";
-    /** {@code run_ha_routine} nimmt den Namen als {@code name} - "routine" sagt mehr darueber aus. */
     static final String ROUTINE = "routine";
 
     private final HomeAssistantEntityIndex index;
     private final AreaResolver areas;
+    private final RefreshingCache<IdempotentEntities> idempotent;
     private final ObjectMapper jsonMapper;
 
-    public HomeAssistantResources(HomeAssistantEntityIndex index, AreaResolver areas, ObjectMapper jsonMapper) {
+    public HomeAssistantResources(HomeAssistantEntityIndex index, AreaResolver areas,
+            RefreshingCache<IdempotentEntities> idempotent, ObjectMapper jsonMapper) {
         this.index = index;
         this.areas = areas;
+        this.idempotent = idempotent;
         this.jsonMapper = jsonMapper;
     }
 
@@ -62,10 +69,27 @@ public class HomeAssistantResources {
     EntityCatalog catalog() {
         List<EntityCatalog.Entry> entries = new ArrayList<>();
         addAreas(entries);
+        IdempotentEntities labeled = labeledIdempotent();
         for (HomeAssistantEntity entity : index.fresh().all()) {
-            entries.add(new EntityCatalog.Entry(typeOf(entity), entity.name(), entity.entityId(), List.of()));
+            entries.add(new EntityCatalog.Entry(typeOf(entity), entity.name(), entity.entityId(), List.of(),
+                    labeled.contains(entity.entityId())));
         }
         return new EntityCatalog(entries);
+    }
+
+    /**
+     * Ohne lesbares Label gibt es keine Zusage - der sichere Stand, bei dem der AIService nur die
+     * Ergebnistexte der Werkzeuge spricht. Der Katalog selbst soll daran nicht scheitern, denn die
+     * Namen braucht der AIService unabhaengig davon.
+     */
+    private IdempotentEntities labeledIdempotent() {
+        try {
+            return idempotent.get();
+        } catch (RuntimeException ex) {
+            log.debug("Label {} nicht lesbar, Katalog ohne Idempotenz-Zusagen: {}",
+                    IdempotentEntities.LABEL, ex.getMessage());
+            return IdempotentEntities.NONE;
+        }
     }
 
     /**

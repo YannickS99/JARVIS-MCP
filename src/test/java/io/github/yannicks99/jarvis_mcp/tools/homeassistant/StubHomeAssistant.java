@@ -6,9 +6,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Ein Home Assistant, das nur so viel kann, wie die Tests sehen muessen: Zustaende ausliefern und
@@ -34,6 +36,9 @@ public final class StubHomeAssistant implements AutoCloseable {
     private volatile String templateBody = "[[],[]]";
     /** Antwort auf das Lichtzustands-Template - erkannt am Wort "states.light" im Request. */
     private volatile String lightsBody = "[]";
+    /** Antwort auf das Label-Template - erkannt an "label_entities" im Request. */
+    private volatile String labelsBody = "[]";
+    private volatile int labelsStatus = 200;
     private volatile int templateStatus = 200;
     private volatile int statesStatus = 200;
     private volatile int serviceStatus = 200;
@@ -82,9 +87,21 @@ public final class StubHomeAssistant implements AutoCloseable {
         this.templateStatus = status;
     }
 
+    /** Die entity_ids, die das Label-Template liefern soll. */
+    public void labeled(String... entityIds) {
+        this.labelsBody = Arrays.stream(entityIds)
+                .map(id -> '"' + id + '"')
+                .collect(Collectors.joining(",", "[", "]"));
+    }
+
+    /** Nur das Label-Template scheitern lassen - etwa ein Home Assistant ohne label_entities. */
+    public void labelsStatus(int status) {
+        this.labelsStatus = status;
+    }
+
     /**
-     * Zwei Templates gehen ueber denselben Endpunkt - der Stub rendert nicht, er unterscheidet nur,
-     * welches der beiden gefragt war, und gibt die passende vorbereitete Antwort.
+     * Mehrere Templates gehen ueber denselben Endpunkt - der Stub rendert nicht, er unterscheidet
+     * nur, welches gefragt war, und gibt die passende vorbereitete Antwort.
      */
     private void handleTemplate(HttpExchange exchange) throws IOException {
         templateRequests.incrementAndGet();
@@ -94,6 +111,10 @@ public final class StubHomeAssistant implements AutoCloseable {
         }
         if (templateStatus != 200) {
             respond(exchange, templateStatus, "unauthorized");
+            return;
+        }
+        if (requested.contains("label_entities")) {
+            respond(exchange, labelsStatus, labelsStatus == 200 ? labelsBody : "template error");
             return;
         }
         respond(exchange, 200, requested.contains("states.light") ? lightsBody : templateBody);

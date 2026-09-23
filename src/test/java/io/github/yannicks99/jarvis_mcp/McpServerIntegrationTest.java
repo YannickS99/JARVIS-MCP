@@ -61,6 +61,7 @@ class McpServerIntegrationTest {
                 StubHomeAssistant.entity("script.gute_nacht", "Gute Nacht")));
         // Die Bereiche kommen aus Home Assistant - "Arbeitszimmer" steht in keiner Konfiguration.
         homeAssistant.areas("wohnzimmer", "Wohnzimmer", "arbeitszimmer", "Arbeitszimmer");
+        homeAssistant.labeled("script.gute_nacht");
         homeAssistant.lights(
                 StubHomeAssistant.light("light.stehlampe", "Stehlampe", "on", "wohnzimmer", "Wohnzimmer"),
                 StubHomeAssistant.light("light.buero_decke", "Bürolicht", "off",
@@ -153,6 +154,14 @@ class McpServerIntegrationTest {
         assertThat(areaTool.inputSchema()).extracting("required", InstanceOfAssertFactories.LIST)
                 .containsExactlyInAnyOrder("area", "power");
 
+        // Der Parameter heisst wie der Typ im Entity-Katalog - daran prueft der AIService, dass
+        // das Sprachmodell wirklich eine Routine uebergeben hat und keinen Bereich.
+        McpSchema.Tool routineTool = tools.stream()
+                .filter(tool -> tool.name().equals("run_ha_routine"))
+                .findFirst().orElseThrow();
+        assertThat(routineTool.inputSchema()).extracting("properties", InstanceOfAssertFactories.MAP)
+                .containsOnlyKeys("routine");
+
         // Beim Status ist der Bereich optional - sonst kann die KI nicht nach dem ganzen Haus
         // fragen, ohne sich einen Bereich auszudenken.
         McpSchema.Tool statusTool = tools.stream()
@@ -174,21 +183,24 @@ class McpServerIntegrationTest {
     }
 
     @Test
-    @DisplayName("jedes Werkzeug sagt, ob es ohne Rueckfrage beim Sprachmodell wiederholt werden darf")
+    @DisplayName("jedes Werkzeug sagt, ob es etwas veraendert und ob eine Wiederholung dasselbe bewirkt")
     void annotatesCacheability() {
         client = connect("geheim");
         Map<String, McpSchema.ToolAnnotations> annotations = client.listTools().tools().stream()
                 .collect(java.util.stream.Collectors.toMap(McpSchema.Tool::name, McpSchema.Tool::annotations));
 
-        // Genau diese drei sind cachebar: zustandsveraendernd, aber idempotent.
+        // Zustandsveraendernd - der AIService darf sie aus dem Cache ausfuehren.
+        assertThat(annotations).allSatisfy((name, hints) ->
+                assertThat(!hints.readOnlyHint()).as(name).isEqualTo(List.of("set_area_lights_power",
+                        "set_light_power", "set_application_power", "run_ha_routine").contains(name)));
+        // Davon idempotent - nur fuer diese gelten gelernte Antworten fuer das ganze Werkzeug.
         assertThat(annotations).allSatisfy((name, hints) -> {
-            boolean cacheable = !hints.readOnlyHint() && hints.idempotentHint();
-            assertThat(cacheable).as(name).isEqualTo(
+            boolean idempotentAction = !hints.readOnlyHint() && hints.idempotentHint();
+            assertThat(idempotentAction).as(name).isEqualTo(
                     List.of("set_area_lights_power", "set_light_power", "set_application_power").contains(name));
         });
-        assertThat(annotations.get("get_lights_status").readOnlyHint()).isTrue();
-        assertThat(annotations.get("get_applications_status").readOnlyHint()).isTrue();
-        // Routinen sind frei definiert und deshalb bewusst nicht idempotent.
+        // Routinen sind frei definiert und deshalb bewusst nicht idempotent - die Zusage gibt es
+        // nur je Routine, ueber das Label im Entity-Katalog.
         assertThat(annotations.get("run_ha_routine").idempotentHint()).isFalse();
     }
 
@@ -216,7 +228,9 @@ class McpServerIntegrationTest {
         assertThat(json)
                 .contains("{\"type\":\"area\",\"name\":\"Arbeitszimmer\",\"ref\":\"arbeitszimmer\",\"aliases\":[\"Büro\"]}")
                 .contains("{\"type\":\"light\",\"name\":\"Stehlampe\",\"ref\":\"light.stehlampe\",\"aliases\":[]}")
-                .contains("{\"type\":\"routine\",\"name\":\"Gute Nacht\",\"ref\":\"script.gute_nacht\",\"aliases\":[]}");
+                // Traegt in Home Assistant das Label jarvis-idempotent.
+                .contains("{\"type\":\"routine\",\"name\":\"Gute Nacht\",\"ref\":\"script.gute_nacht\","
+                        + "\"aliases\":[],\"idempotent\":true}");
         // Ein Abruf liest den warmgehaltenen Stand - geschaltet wird dabei nichts.
         assertThat(homeAssistant.calls()).isEmpty();
     }
@@ -363,9 +377,9 @@ class McpServerIntegrationTest {
     void runsRoutine() {
         client = connect("geheim");
 
-        McpSchema.CallToolResult result = call("run_ha_routine", Map.of("name", "Gute Nacht"));
+        McpSchema.CallToolResult result = call("run_ha_routine", Map.of("routine", "Gute Nacht"));
 
-        assertThat(text(result)).contains("Gute Nacht");
+        assertThat(text(result)).isEqualTo("Die Routine 'Gute Nacht' wurde ausgelöst.");
         assertThat(homeAssistant.calls()).singleElement().satisfies(serviceCall -> {
             assertThat(serviceCall.domain()).isEqualTo("script");
             assertThat(serviceCall.service()).isEqualTo("turn_on");
