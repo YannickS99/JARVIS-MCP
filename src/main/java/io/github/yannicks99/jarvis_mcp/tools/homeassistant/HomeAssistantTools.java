@@ -82,6 +82,31 @@ public class HomeAssistantTools {
         return "Alle Lichter im Bereich '%s' wurden %s.".formatted(area, participle(parsed.get()));
     }
 
+    // Ein eigenes Werkzeug statt einer Routine "Alle Lichter an": Als Routinenname wuerde "an" im
+    // Namen verschwinden, und das Sprachmodell haelt den Satz fuer einen Lichtbefehl, nicht fuer
+    // den Namen einer Routine.
+    @McpTool(name = "set_all_lights_power",
+            annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = true,
+                    destructiveHint = false, openWorldHint = false),
+            description = """
+                    Schaltet alle Lichter im ganzen Haus gemeinsam an oder aus. \
+                    Fuer Anweisungen, die weder einen Raum noch eine einzelne Lampe nennen, \
+                    z. B. "mach alle Lichter aus". Fuer einen einzelnen Raum stattdessen \
+                    set_area_lights_power verwenden.""")
+    public String setAllLightsPower(
+            @McpToolParam(required = true, description = "\"on\" zum Einschalten, \"off\" zum Ausschalten.")
+            String power) {
+
+        Optional<Power> parsed = Power.parse(power);
+        if (parsed.isEmpty()) {
+            return invalidPower(power);
+        }
+
+        client.callService("light", service(parsed.get()), Map.of("entity_id", "all"));
+        log.info("Alle Lichter {}", participle(parsed.get()));
+        return "Alle Lichter wurden %s.".formatted(participle(parsed.get()));
+    }
+
     @McpTool(name = "set_light_power",
             annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = true,
                     destructiveHint = false, openWorldHint = false),

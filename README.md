@@ -20,6 +20,7 @@ LLM → MCP-Werkzeug set_application_power  → JARVIS-MCP → Monitoring-Tool-R
 | Werkzeug | Parameter | Wirkung |
 |---|---|---|
 | `set_area_lights_power` | `area`, `power` | Schaltet alle Lichter eines Bereichs an/aus |
+| `set_all_lights_power` | `power` | Schaltet alle Lichter im Haus an/aus (`entity_id: all`) |
 | `set_light_power` | `light`, `power` | Schaltet ein einzelnes Licht über seinen Anzeigenamen |
 | `run_ha_routine` | `routine` | Löst eine Home-Assistant-Szene oder ein -Skript aus |
 | `get_lights_status` | `area` (optional) | Sagt, welche Lichter gerade an sind — im ganzen Haus oder in einem Bereich |
@@ -121,6 +122,11 @@ kann es sofort über `run_ha_routine` ansprechen — an JARVIS-MCP ist dafür ni
 eine Routine bei jedem Auslösen garantiert dasselbe (etwa „Gute Nacht", anders als ein
 Garagentor-Toggle), bekommt sie in Home Assistant das Label **`jarvis-idempotent`** — siehe unten.
 
+Eine Routine sollte nicht so heißen wie ein Gerätebefehl („Alle Lichter an"): Das Sprachmodell hält
+den Satz dann für einen Lichtbefehl statt für einen Routinennamen, und im semantischen Cache
+verschwindet die Schaltrichtung im Namen. Für das ganze Haus gibt es deshalb `set_all_lights_power`;
+Routinen bekommen eigene Namen wie „Scheunentor-Protokoll".
+
 ## Für den semantischen Cache des AIService
 
 Der [JARVIS-AIService](https://github.com/YannickS99/JARVIS-AIService) überspringt bei bekannten
@@ -138,6 +144,7 @@ entscheidet, woher dann die Antwort kommt:
 | Werkzeug | `readOnlyHint` | `idempotentHint` | aus dem Cache | Antwort |
 |---|---|---|---|---|
 | `set_area_lights_power` | `false` | `true` | ja | gelernte Vorlage |
+| `set_all_lights_power` | `false` | `true` | ja | gelernte Vorlage |
 | `set_light_power` | `false` | `true` | ja | gelernte Vorlage |
 | `set_application_power` | `false` | `true` | ja | gelernte Vorlage |
 | `run_ha_routine` | `false` | `false` | ja | Ergebnistext des Werkzeugs — Vorlage nur mit Label (s. u.) |
