@@ -139,9 +139,16 @@ class McpServerIntegrationTest {
         List<McpSchema.Tool> tools = client.listTools().tools();
 
         assertThat(tools).extracting(McpSchema.Tool::name)
-                .containsExactlyInAnyOrder("set_area_lights_power", "set_light_power", "run_ha_routine",
-                        "get_lights_status", "get_light_status",
+                .containsExactlyInAnyOrder("set_area_lights_power", "set_all_lights_power", "set_light_power",
+                        "run_ha_routine", "get_lights_status", "get_light_status",
                         "get_applications_status", "set_application_power");
+
+        // Nur die Schaltrichtung - "alle" steckt im Werkzeug, nicht in einem erfundenen Bereich.
+        McpSchema.Tool allLightsTool = tools.stream()
+                .filter(tool -> tool.name().equals("set_all_lights_power"))
+                .findFirst().orElseThrow();
+        assertThat(allLightsTool.inputSchema()).extracting("properties", InstanceOfAssertFactories.MAP)
+                .containsOnlyKeys("power");
 
         McpSchema.Tool areaTool = tools.stream()
                 .filter(tool -> tool.name().equals("set_area_lights_power"))
@@ -192,12 +199,13 @@ class McpServerIntegrationTest {
         // Zustandsveraendernd - der AIService darf sie aus dem Cache ausfuehren.
         assertThat(annotations).allSatisfy((name, hints) ->
                 assertThat(!hints.readOnlyHint()).as(name).isEqualTo(List.of("set_area_lights_power",
-                        "set_light_power", "set_application_power", "run_ha_routine").contains(name)));
+                        "set_all_lights_power", "set_light_power", "set_application_power", "run_ha_routine")
+                        .contains(name)));
         // Davon idempotent - nur fuer diese gelten gelernte Antworten fuer das ganze Werkzeug.
         assertThat(annotations).allSatisfy((name, hints) -> {
             boolean idempotentAction = !hints.readOnlyHint() && hints.idempotentHint();
-            assertThat(idempotentAction).as(name).isEqualTo(
-                    List.of("set_area_lights_power", "set_light_power", "set_application_power").contains(name));
+            assertThat(idempotentAction).as(name).isEqualTo(List.of("set_area_lights_power",
+                    "set_all_lights_power", "set_light_power", "set_application_power").contains(name));
         });
         // Routinen sind frei definiert und deshalb bewusst nicht idempotent - die Zusage gibt es
         // nur je Routine, ueber das Label im Entity-Katalog.
@@ -341,6 +349,30 @@ class McpServerIntegrationTest {
             assertThat(serviceCall.service()).isEqualTo("turn_on");
             assertThat(serviceCall.body()).contains("\"area_id\":\"arbeitszimmer\"");
         });
+    }
+
+    @Test
+    @DisplayName("alle Lichter im Haus werden mit einem einzigen Dienstaufruf geschaltet")
+    void switchesAllLights() {
+        client = connect("geheim");
+
+        McpSchema.CallToolResult result = call("set_all_lights_power", Map.of("power", "aus"));
+
+        assertThat(text(result)).isEqualTo("Alle Lichter wurden ausgeschaltet.");
+        assertThat(homeAssistant.calls()).singleElement().satisfies(serviceCall -> {
+            assertThat(serviceCall.domain()).isEqualTo("light");
+            assertThat(serviceCall.service()).isEqualTo("turn_off");
+            assertThat(serviceCall.body()).contains("\"entity_id\":\"all\"");
+        });
+    }
+
+    @Test
+    @DisplayName("ohne gueltige Schaltrichtung wird nicht das ganze Haus geschaltet")
+    void allLightsNeedValidPower() {
+        client = connect("geheim");
+
+        assertThat(text(call("set_all_lights_power", Map.of("power", "heller")))).contains("\"on\"");
+        assertThat(homeAssistant.calls()).isEmpty();
     }
 
     @Test
