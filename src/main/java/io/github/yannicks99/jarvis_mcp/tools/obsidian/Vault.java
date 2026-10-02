@@ -303,9 +303,14 @@ class Vault {
      * <p>Das ist der Grund, weshalb JARVIS ohne Rueckfrage schreiben darf: Nichts geht verloren, und
      * eine missratene Aenderung laesst sich von Hand zurueckholen. Scheitert die Sicherung, wird
      * <em>nicht</em> geschrieben - dann lieber gar keine Aenderung als eine unumkehrbare.
+     *
+     * <p>Die Ablage liegt im <strong>Schreibordner</strong>, nicht in der Vault-Wurzel: Die ist im
+     * Container nur lesend eingehaengt ({@code docker-compose.yml}), und gerade das soll so bleiben.
+     * Geaendert werden kann ohnehin nur im Schreibordner - die Sicherung liegt also neben dem, was sie
+     * sichert. Der Dateiname nennt den Pfad ab der Wurzel, damit er eindeutig bleibt.
      */
     private void backup(Path file, String content) {
-        Path directory = root().resolve(VaultPath.HISTORY_DIR);
+        Path directory = properties.writeRoot().resolve(VaultPath.HISTORY_DIR);
         String name = "%s-%s".formatted(
                 VaultPath.relative(root(), file).replace('/', '_'),
                 LocalDateTime.now().format(STAMP));

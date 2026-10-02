@@ -85,7 +85,8 @@ draußen werden abgewiesen, bevor irgendetwas geöffnet wird. Was privat bleiben
 
 **Geschrieben wird ohne Rückfrage, aber nicht ohne Netz.** Eine Bestätigung vor jeder Änderung wäre
 im Gespräch nur lästig; stattdessen gilt dreierlei: Jede Änderung legt die **Vorgängerfassung** in
-`.jarvis-history` ab, geschrieben wird **atomar** (Nachbardatei, dann umbenennen), und
+`.jarvis-history` **im Schreibordner** ab (die Vault-Wurzel ist nur lesend eingehängt; bis 1.7.0 lag
+die Ablage dort, und `append_note`/`replace_section` scheiterten mit „Read-only file system“), geschrieben wird **atomar** (Nachbardatei, dann umbenennen), und
 `replace_section` verlangt den **Stand** aus `read_note` — hat jemand die Notiz inzwischen in
 Obsidian bearbeitet, wird abgebrochen statt überschrieben. Scheitert die Sicherung, unterbleibt die
 Änderung ganz.
