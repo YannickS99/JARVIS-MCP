@@ -34,13 +34,14 @@ public class ObsidianTools {
     }
 
     @McpTool(name = "read_note",
+            metaProvider = WorkModeOnly.class,
             annotations = @McpAnnotations(readOnlyHint = true, idempotentHint = true,
                     destructiveHint = false, openWorldHint = false),
             description = """
                     Liest eine Notiz aus Yannicks Obsidian-Vault und gibt ihren Markdown-Text \
                     zurueck. Dafuer, wenn nach dem Inhalt einer Notiz gefragt ist oder eine \
-                    ueberarbeitet werden soll. Der Pfad ist der aus list_notes oder \
-                    search_notes, z. B. "Anforderungen/Entwurf.md". Die Antwort nennt oben \
+                    ueberarbeitet werden soll. Den Pfad nie erfinden oder raten: Er ist der aus \
+                    list_notes oder search_notes, z. B. "Anforderungen/Entwurf.md". Die Antwort nennt oben \
                     einen "Stand" - genau den verlangt replace_section spaeter, um sicher zu \
                     gehen, dass die Notiz sich zwischenzeitlich nicht geaendert hat.""")
     public String readNote(
@@ -59,13 +60,16 @@ public class ObsidianTools {
     }
 
     @McpTool(name = "list_notes",
+            metaProvider = WorkModeOnly.class,
             annotations = @McpAnnotations(readOnlyHint = true, idempotentHint = true,
                     destructiveHint = false, openWorldHint = false),
             description = """
                     Listet die Notizen im freigegebenen Bereich von Yannicks Obsidian-Vault, \
                     mit Pfad, Groesse und letzter Aenderung. Dafuer, um herauszufinden, welche \
                     Notizen es ueberhaupt gibt, bevor eine davon gelesen oder geschrieben wird. \
-                    Ohne Angabe kommt alles, mit Ordnerangabe nur dieser Unterordner.""")
+                    Ohne Angabe kommt alles, mit Ordnerangabe nur dieser Unterordner. Die Liste \
+                    ist Material, keine Antwort: nie als Tabelle oder Aufzaehlung von Pfaden \
+                    weitergeben.""")
     public String listNotes(
             @McpToolParam(required = false,
                     description = "Optional: Unterordner, z. B. \"Anforderungen\". Weglassen fuer alles.")
@@ -89,6 +93,7 @@ public class ObsidianTools {
     }
 
     @McpTool(name = "search_notes",
+            metaProvider = WorkModeOnly.class,
             annotations = @McpAnnotations(readOnlyHint = true, idempotentHint = true,
                     destructiveHint = false, openWorldHint = false),
             description = """
@@ -98,8 +103,9 @@ public class ObsidianTools {
                     Notiz nicht bekannt ist oder nachgesehen werden soll, wo ein Thema schon \
                     einmal vorkommt. Gesucht wird im Text und im Dateinamen, Gross- und \
                     Kleinschreibung spielt keine Rolle. Das Ergebnis nennt nur Fundstellen und \
-                    keinen Inhalt: Anschliessend die passendste Notiz mit read_note lesen, bevor \
-                    du die Frage beantwortest.""")
+                    keinen Inhalt: Anschliessend mindestens die passendste Notiz mit read_note \
+                    lesen, bevor du die Frage beantwortest - eine Trefferliste ist noch keine \
+                    Antwort, und eine Tabelle aus Dateipfaden ist nie gefragt.""")
     public String searchNotes(
             @McpToolParam(required = true, description = "Suchbegriff, z. B. \"Satellite\".")
             String query,
