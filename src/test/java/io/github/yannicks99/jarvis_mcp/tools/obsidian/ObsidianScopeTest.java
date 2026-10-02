@@ -6,6 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -60,6 +63,31 @@ class ObsidianScopeTest {
         assertThatThrownBy(() -> writing.createNote("Anforderungen/Neu.md", "Text"))
                 .isInstanceOf(ObsidianException.class)
                 .hasMessageContaining("nur in");
+    }
+
+    @Test
+    @DisplayName("Vorgaengerfassungen landen im Schreibordner - die Vault-Wurzel ist im Container nur lesend")
+    void keepsHistoryInsideTheWriteRoot() throws IOException {
+        // Wie auf JARVIS: Die Wurzel ist schreibgeschuetzt, nur der Schreibordner nicht. Vorher
+        // landete die Sicherung unter <Wurzel>/.jarvis-history - "Read-only file system", und
+        // append_note und replace_section scheiterten jedes Mal.
+        Set<PosixFilePermission> before = Files.getPosixFilePermissions(root);
+        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("r-xr-xr-x"));
+        try {
+            new ObsidianWriteTools(vault("Entwuerfe", "")).appendNote("Entwuerfe/Offen.md", "- ein Punkt");
+        } finally {
+            Files.setPosixFilePermissions(root, before);
+        }
+
+        assertThat(root.resolve(VaultPath.HISTORY_DIR)).doesNotExist();
+        try (var history = Files.list(root.resolve("Entwuerfe").resolve(VaultPath.HISTORY_DIR))) {
+            assertThat(history.map(path -> path.getFileName().toString()).toList())
+                    .singleElement()
+                    .asString()
+                    .startsWith("Entwuerfe_Offen.md-");
+        }
+        // Versteckt bleibt sie trotzdem: keine Notiz in Listen und Suchergebnissen.
+        assertThat(new ObsidianTools(vault("Entwuerfe", "")).listNotes("Entwuerfe")).doesNotContain(VaultPath.HISTORY_DIR);
     }
 
     @Test
