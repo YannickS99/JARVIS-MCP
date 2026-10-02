@@ -62,6 +62,7 @@ eingehängten Vault-Ordner erscheinen die Werkzeuge gar nicht erst in `tools/lis
 | `create_note` | `path`, `content` | Legt eine neue Notiz an; eine bestehende wird nie überschrieben |
 | `append_note` | `path`, `content` | Hängt Text ans Ende einer Notiz an |
 | `replace_section` | `path`, `heading`, `content`, `stand` | Ersetzt den Inhalt eines Abschnitts, die Überschrift bleibt stehen |
+| `replace_text` | `path`, `oldText`, `newText`, `stand` | Ersetzt (oder löscht, mit leerem `newText`) eine Textstelle, die genau einmal vorkommt — für alles ohne eigene Überschrift |
 
 **Die Suche rankt, bevor sie kürzt.** Je Notiz entsteht genau ein Treffer — zwei Zeilen
 derselben Datei sahen im Ergebnis aus wie zwei Notizen, und das Modell hat diese Doppelung
@@ -95,6 +96,14 @@ Obsidian bearbeitet, wird abgebrochen statt überschrieben. Scheitert die Sicher
 unabhängig von Groß-/Kleinschreibung, ersetzt alles bis zur nächsten gleich- oder höherrangigen
 Überschrift und lässt die folgenden Abschnitte unberührt. Ist die Überschrift unbekannt, nennt die
 Antwort die vorhandenen.
+
+**Für alles ohne eigene Überschrift gibt es `replace_text`** — einen Listenpunkt, eine fett
+gesetzte Zwischenzeile, einen Satz. Anlass (02.10.2026): Im Arbeitsmodus per Sprache sollte ein
+Punkt unter „**Offene Fragen**“ raus; das war nur fett, keine `#`-Zeile, und `replace_section`
+scheiterte dreimal in Folge. Die Stelle muss genau einmal vorkommen (sonst: nicht gefunden bzw.
+„N-mal“, und nichts wird geändert), der Stand aus `read_note` gilt wie bei `replace_section`. Die
+Fehlermeldung von `replace_section` verweist jetzt darauf. Nebenbei: Zwei Sicherungen derselben
+Notiz in einer Sekunde überschrieben sich bisher gegenseitig — jetzt bekommt die zweite eine Nummer.
 
 **Der Container läuft unter `1000:1000`** (`RUN_AS` in der `.env`). Der Vault gehört auf JARVIS
 diesem Benutzer, und seine Ordner geben „anderen" keinen Zugriff; unter der Kennung aus dem Image
@@ -149,7 +158,7 @@ entscheidet, woher dann die Antwort kommt:
 | `set_light_power` | `false` | `true` | ja | gelernte Vorlage |
 | `set_application_power` | `false` | `true` | ja | gelernte Vorlage |
 | `run_ha_routine` | `false` | `false` | ja | Ergebnistext des Werkzeugs — Vorlage nur mit Label (s. u.) |
-| `create_note`, `append_note`, `replace_section` | `false` | `false` | (wird nie gelernt) | — |
+| `create_note`, `append_note`, `replace_section`, `replace_text` | `false` | `false` | (wird nie gelernt) | — |
 | `get_lights_status`, `get_light_status`, `get_applications_status` | `true` | — | nein | — |
 | `read_note`, `list_notes`, `search_notes` | `true` | — | nein | — |
 
