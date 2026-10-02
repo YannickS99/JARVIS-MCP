@@ -106,6 +106,11 @@ nicht im Prompt des AIService, wie die Werkzeuge zu benutzen sind (Pfad nie rate
 und dann lesen, eine Trefferliste ist keine Antwort, Vault-Stil beim Anlegen) — in den
 Beschreibungen, die das Modell genau dann sieht, wenn das Werkzeug angeboten wird.
 
+**`search_notes` übersieht keine Schreibweise:** Leerzeichen, Bindestriche (auch `‑`/`–`) und
+Unterstriche zählen beim Vergleich nicht — „Jarvis Pilot - Übersicht" findet „JARVIS-Pilot -
+Übersicht", „Monitoring Tool" findet „MonitoringTool". Anlass: Im Arbeitsmodus per Sprache suchte
+die KI zwölfmal ohne Treffer (45 s), weil sie die Namen anders zusammenschrieb als der Vault.
+
 **Für alles ohne eigene Überschrift gibt es `replace_text`** — einen Listenpunkt, eine fett
 gesetzte Zwischenzeile, einen Satz. Anlass (02.10.2026): Im Arbeitsmodus per Sprache sollte ein
 Punkt unter „**Offene Fragen**“ raus; das war nur fett, keine `#`-Zeile, und `replace_section`

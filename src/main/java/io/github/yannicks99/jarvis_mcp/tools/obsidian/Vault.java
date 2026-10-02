@@ -18,6 +18,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -127,12 +128,21 @@ class Vault {
      * Abbruch bei erreichter Obergrenze lieferte die ersten Notizen der Ordnerreihenfolge statt der
      * passendsten - eine Suche nach "Monetheus" fand so jede Unterakte, aber nicht die
      * Uebersichtsnotiz, die genau so heisst.
+     *
+     * <p>Und <strong>Trennzeichen zaehlen nicht</strong>: Leerzeichen, Bindestriche und Unterstriche
+     * fallen auf beiden Seiten weg ({@link #compact}). Im Arbeitsmodus per Sprache suchte die KI
+     * zwoelfmal ohne Treffer nach "Jarvis Pilot - Uebersicht" und "Monitoring Tool - Uebersicht" -
+     * die Notizen heissen "JARVIS-Pilot - Uebersicht" und "MonitoringTool - Uebersicht". Wer einen
+     * Namen gehoert oder aus dem Gedaechtnis hat, weiss selten, wie er zusammengeschrieben wird.
      */
     SearchResult search(String query, String folder) {
         if (query == null || query.isBlank()) {
             throw new ObsidianException("Es fehlt der Suchbegriff.");
         }
-        String needle = query.strip().toLowerCase(Locale.GERMAN);
+        String needle = compact(query);
+        if (needle.isEmpty()) {
+            throw new ObsidianException("Der Suchbegriff besteht nur aus Trennzeichen.");
+        }
         List<SearchHit> hits = new ArrayList<>();
 
         for (NoteInfo note : listAll(folder)) {
@@ -153,14 +163,14 @@ class Vault {
     /** Der aussagekraeftigste Treffer einer einzelnen Notiz, oder keiner. */
     private Optional<SearchHit> bestHit(String path, List<String> lines, String needle) {
         // Auch der Dateiname zaehlt: Wer nach "Satellite" sucht, meint oft die Notiz selbst.
-        if (path.toLowerCase(Locale.GERMAN).contains(needle)) {
+        if (compact(path).contains(needle)) {
             return Optional.of(new SearchHit(path, 0, firstLine(lines), Relevance.FILENAME));
         }
 
         SearchHit imText = null;
         for (int index = 0; index < lines.size(); index++) {
             String line = lines.get(index);
-            if (!line.toLowerCase(Locale.GERMAN).contains(needle)) {
+            if (!compact(line).contains(needle)) {
                 continue;
             }
             // Eine Ueberschrift benennt das Thema eines Abschnitts, eine Fliesstextzeile erwaehnt es
@@ -174,6 +184,13 @@ class Vault {
         }
         return Optional.ofNullable(imText);
     }
+
+    /** Fuer den Vergleich beim Suchen: klein geschrieben, ohne Leerzeichen, Bindestriche, Unterstriche. */
+    static String compact(String text) {
+        return SEPARATORS.matcher(text.toLowerCase(Locale.GERMAN)).replaceAll("");
+    }
+
+    private static final Pattern SEPARATORS = Pattern.compile("[\\s\\-_\u2010-\u2015]+");
 
     // --------------------------------------------------------------- schreiben
 
