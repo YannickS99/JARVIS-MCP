@@ -31,15 +31,17 @@ public class ObsidianWriteTools {
     }
 
     @McpTool(name = "create_note",
+            metaProvider = WorkModeOnly.class,
             annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = false,
                     destructiveHint = false, openWorldHint = false),
             description = """
                     Legt eine neue Notiz in Yannicks Obsidian-Vault an. Dafuer, wenn ein Entwurf, \
                     ein Protokoll oder eine Zusammenfassung dauerhaft festgehalten werden soll. \
-                    Der Inhalt ist Markdown im Stil des Vaults: Ueberschriften mit ##, Tabellen \
-                    fuer Uebersichten, [[Wikilinks]] auf verwandte Notizen. Eine bereits \
-                    bestehende Notiz wird nicht ueberschrieben - dafuer append_note oder \
-                    replace_section.""")
+                    Der Inhalt ist Markdown im Stil des Vaults: echte Ueberschriften mit ## \
+                    (keine nur fett gesetzten Zeilen), Tabellen fuer Uebersichten, [[Wikilinks]] \
+                    auf verwandte Notizen, Datumsangaben als TT.MM.JJJJ. Geschrieben werden darf \
+                    nur im freigegebenen Ordner. Eine bereits bestehende Notiz wird nicht \
+                    ueberschrieben - dafuer append_note, replace_section oder replace_text.""")
     public String createNote(
             @McpToolParam(required = true,
                     description = "Pfad der neuen Notiz, z. B. \"Entwuerfe/Satelliten.md\". "
@@ -54,6 +56,7 @@ public class ObsidianWriteTools {
     }
 
     @McpTool(name = "append_note",
+            metaProvider = WorkModeOnly.class,
             annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = false,
                     destructiveHint = false, openWorldHint = false),
             description = """
@@ -75,6 +78,7 @@ public class ObsidianWriteTools {
     // Destruktiv, weil vorhandener Text ersetzt wird - die Vorgaengerfassung liegt danach in
     // .jarvis-history, rueckgaengig macht sie aber nur ein Mensch.
     @McpTool(name = "replace_section",
+            metaProvider = WorkModeOnly.class,
             annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = false,
                     destructiveHint = true, openWorldHint = false),
             description = """
@@ -82,7 +86,8 @@ public class ObsidianWriteTools {
                     bleibt stehen. Das ist der Weg, eine Notiz gemeinsam zu ueberarbeiten. \
                     Vorher die Notiz mit read_note lesen und den dort genannten "Stand" hier \
                     angeben - stimmt er nicht mehr, wurde die Notiz zwischenzeitlich geaendert \
-                    und es wird nichts ueberschrieben.""")
+                    und es wird nichts ueberschrieben; dann erneut lesen und die Aenderung darauf \
+                    aufsetzen. Fuer eine Stelle ohne eigene #-Ueberschrift replace_text.""")
     public String replaceSection(
             @McpToolParam(required = true, description = "Pfad der Notiz.")
             String path,
@@ -103,6 +108,7 @@ public class ObsidianWriteTools {
 
     // Destruktiv aus demselben Grund wie replace_section.
     @McpTool(name = "replace_text",
+            metaProvider = WorkModeOnly.class,
             annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = false,
                     destructiveHint = true, openWorldHint = false),
             description = """

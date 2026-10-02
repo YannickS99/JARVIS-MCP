@@ -97,6 +97,15 @@ unabhängig von Groß-/Kleinschreibung, ersetzt alles bis zur nächsten gleich- 
 Überschrift und lässt die folgenden Abschnitte unberührt. Ist die Überschrift unbekannt, nennt die
 Antwort die vorhandenen.
 
+**Die Vault-Werkzeuge gehören in den Arbeitsmodus — das sagt dieser Server, nicht der
+AIService.** Jedes Obsidian-Werkzeug trägt in `_meta` den Eintrag `"jarvis/modes": ["work"]`
+(`WorkModeOnly`, über `@McpTool(metaProvider = …)`). Der JARVIS-AIService bietet es damit nur in
+Arbeits-Unterhaltungen an und kennt selbst keinen einzigen Werkzeugnamen; ein neues Werkzeug
+braucht dort keine Änderung. Werkzeuge ohne den Eintrag gelten in allen Modi. Ebenso steht hier,
+nicht im Prompt des AIService, wie die Werkzeuge zu benutzen sind (Pfad nie raten, erst suchen
+und dann lesen, eine Trefferliste ist keine Antwort, Vault-Stil beim Anlegen) — in den
+Beschreibungen, die das Modell genau dann sieht, wenn das Werkzeug angeboten wird.
+
 **Für alles ohne eigene Überschrift gibt es `replace_text`** — einen Listenpunkt, eine fett
 gesetzte Zwischenzeile, einen Satz. Anlass (02.10.2026): Im Arbeitsmodus per Sprache sollte ein
 Punkt unter „**Offene Fragen**“ raus; das war nur fett, keine `#`-Zeile, und `replace_section`
