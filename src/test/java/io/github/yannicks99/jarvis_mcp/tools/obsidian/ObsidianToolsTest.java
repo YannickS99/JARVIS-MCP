@@ -111,6 +111,24 @@ class ObsidianToolsTest {
     }
 
     @Test
+    @DisplayName("search_notes unterscheidet nicht zwischen Leerzeichen, Bindestrich und zusammengeschrieben")
+    void ignoresSeparators() throws IOException {
+        // Wie im Test per Sprache am 02.10.2026: zwoelf Suchen ohne Treffer, weil die KI die Namen
+        // anders zusammenschrieb, als sie im Vault stehen.
+        Files.createDirectories(root.resolve("JARVIS-Pilot"));
+        Files.writeString(root.resolve("JARVIS-Pilot/JARVIS-Pilot - Übersicht.md"), "# JARVIS-Pilot\n");
+        Files.writeString(root.resolve("MonitoringTool - Übersicht.md"), "# MonitoringTool\n");
+        // gpt-oss schreibt gern einen geschuetzten Bindestrich (U+2011).
+        Files.writeString(root.resolve("Tetris.md"), "# Tetris‑Spiel\n\nEin klassisches Spiel.\n");
+
+        assertThat(tools.searchNotes("Jarvis Pilot - Übersicht", null)).contains("JARVIS-Pilot/JARVIS-Pilot - Übersicht.md");
+        assertThat(tools.searchNotes("Monitoring Tool Übersicht", null)).contains("MonitoringTool - Übersicht.md");
+        assertThat(tools.searchNotes("Monitoring-Tool", null)).contains("MonitoringTool - Übersicht.md");
+        assertThat(tools.searchNotes("Tetris Spiel", null)).contains("Tetris.md", "Zeile 1");
+        assertThatThrownBy(() -> tools.searchNotes(" - ", null)).isInstanceOf(ObsidianException.class);
+    }
+
+    @Test
     @DisplayName("search_notes nennt je Notiz eine Fundstelle, die passendste Notiz zuerst")
     void ranksAndDeduplicates() throws IOException {
         Files.writeString(root.resolve("Anforderungen/Wohnzimmer.md"), "Erwaehnt Satelliten nebenbei.\n");

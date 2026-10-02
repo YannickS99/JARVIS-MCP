@@ -101,8 +101,9 @@ public class ObsidianTools {
                     nennt je Notiz eine Fundstelle mit Pfad und Zeile, die wichtigste zuerst \
                     (Dateiname vor Ueberschrift vor Fliesstext). Dafuer, wenn der Pfad einer \
                     Notiz nicht bekannt ist oder nachgesehen werden soll, wo ein Thema schon \
-                    einmal vorkommt. Gesucht wird im Text und im Dateinamen, Gross- und \
-                    Kleinschreibung spielt keine Rolle. Das Ergebnis nennt nur Fundstellen und \
+                    einmal vorkommt. Gesucht wird im Text und im Dateinamen; Gross- und \
+                    Kleinschreibung, Leerzeichen, Bindestriche und Unterstriche spielen keine Rolle \
+                    ("Monitoring Tool" findet "MonitoringTool"). Das Ergebnis nennt nur Fundstellen und \
                     keinen Inhalt: Anschliessend mindestens die passendste Notiz mit read_note \
                     lesen, bevor du die Frage beantwortest - eine Trefferliste ist noch keine \
                     Antwort, und eine Tabelle aus Dateipfaden ist nie gefragt.""")
