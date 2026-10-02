@@ -220,7 +220,11 @@ class Vault {
         List<String> lines = existing.lines().toList();
         int start = headingIndex(lines, heading);
         if (start < 0) {
-            throw new ObsidianException(("In \"%s\" gibt es keine Ueberschrift \"%s\". Vorhanden sind: %s")
+            // Der Hinweis ist fuer die KI: Im Test hat sie es dreimal mit derselben Ueberschrift
+            // versucht - "Offene Fragen" stand dort nur fett (**Offene Fragen**), nicht als #-Zeile.
+            throw new ObsidianException(("In \"%s\" gibt es keine Ueberschrift \"%s\". Vorhanden sind: %s. "
+                    + "Steht die Stelle nicht unter einer eigenen #-Ueberschrift (etwa nur fett gesetzt), "
+                    + "replace_text mit dem genauen bisherigen Text verwenden.")
                     .formatted(path, heading, String.join(", ", headings(lines))));
         }
         int level = level(lines.get(start));
@@ -240,6 +244,48 @@ class Vault {
         backup(file, existing);
         write(file, updated.toString());
         return VaultPath.relative(root(), file);
+    }
+
+    /**
+     * Ersetzt eine genau benannte Textstelle - fuer alles, was keine eigene Ueberschrift hat: einen
+     * Punkt einer Liste, eine fett gesetzte Zwischenzeile, einen Satz. Leerer neuer Text loescht
+     * die Stelle.
+     *
+     * <p>Die Stelle muss <strong>genau einmal</strong> vorkommen: Kommt sie gar nicht vor, hat die
+     * KI sie falsch abgeschrieben; mehrmals, waere unklar, welche gemeint ist. In beiden Faellen
+     * wird nichts geaendert. Wie bei {@link #replaceSection} gilt der Stand aus {@code read_note}.
+     */
+    String replaceText(String path, String oldText, String newText, String stand) {
+        Path file = writable(file(path));
+        String existing = readText(file);
+        requireUnchanged(path, existing, stand);
+        if (oldText == null || oldText.isBlank()) {
+            throw new ObsidianException("Es fehlt der bisherige Text, der ersetzt werden soll.");
+        }
+        // Zeilenenden so, wie die Notiz sie hat - Obsidian unter Windows schreibt \r\n.
+        String needle = existing.contains("\r\n") ? oldText.replace("\r\n", "\n").replace("\n", "\r\n") : oldText;
+        int count = occurrences(existing, needle);
+        if (count == 0) {
+            throw new ObsidianException(("Die Stelle kommt in \"%s\" nicht vor. Sie muss genau so "
+                    + "angegeben werden, wie read_note sie zeigt - mit Fettschrift (**), Aufzaehlungszeichen "
+                    + "und Satzzeichen.").formatted(path));
+        }
+        if (count > 1) {
+            throw new ObsidianException(("Die Stelle kommt in \"%s\" %d-mal vor - mehr umgebenden Text "
+                    + "angeben, damit klar ist, welche gemeint ist.").formatted(path, count));
+        }
+        String replacement = newText == null ? "" : newText;
+        backup(file, existing);
+        write(file, existing.replace(needle, replacement));
+        return VaultPath.relative(root(), file);
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length())) {
+            count++;
+        }
+        return count;
     }
 
     // ------------------------------------------------------------------ innen
@@ -316,7 +362,13 @@ class Vault {
                 LocalDateTime.now().format(STAMP));
         try {
             Files.createDirectories(directory);
-            Files.writeString(directory.resolve(name), content, StandardCharsets.UTF_8);
+            // Zwei Aenderungen derselben Notiz in einer Sekunde (im Gespraech durchaus moeglich)
+            // duerfen sich nicht gegenseitig die Sicherung ueberschreiben.
+            Path target = directory.resolve(name);
+            for (int copy = 2; Files.exists(target); copy++) {
+                target = directory.resolve(name + "-" + copy);
+            }
+            Files.writeString(target, content, StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new ObsidianException(
                     "Die Vorgaengerfassung liess sich nicht sichern, deshalb wurde nichts geaendert: "

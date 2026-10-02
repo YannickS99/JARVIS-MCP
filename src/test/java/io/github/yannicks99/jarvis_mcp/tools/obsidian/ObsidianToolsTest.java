@@ -226,7 +226,59 @@ class ObsidianToolsTest {
                 "Zeitplan", "…", stand("Anforderungen/Satelliten.md")))
                 .isInstanceOf(ObsidianException.class)
                 .hasMessageContaining("Hardware")
-                .hasMessageContaining("Offene Punkte");
+                .hasMessageContaining("Offene Punkte")
+                // ... und wohin es ohne Ueberschrift geht.
+                .hasMessageContaining("replace_text");
+    }
+
+    // Wie im Test per Sprache am 02.10.2026: "Offene Fragen" nur fett, keine #-Ueberschrift.
+    private static final String TETRIS = """
+            ## Tetris Spiel - Anforderungskatalog
+
+            **Offene Fragen**
+            - Soll es einen Multiplayer-Modus geben?
+            - Welche Lizenz fuer Bibliotheken?
+            """;
+
+    @Test
+    @DisplayName("replace_text ersetzt eine Stelle ohne eigene Ueberschrift - oder loescht sie")
+    void replacesAndDeletesText() throws IOException {
+        Files.writeString(root.resolve("Tetris.md"), TETRIS);
+
+        String answer = writeTools.replaceText("Tetris.md", "- Soll es einen Multiplayer-Modus geben?\n", "",
+                stand("Tetris.md"));
+
+        assertThat(answer).contains("geloescht");
+        assertThat(Files.readString(root.resolve("Tetris.md")))
+                .doesNotContain("Multiplayer")
+                .contains("**Offene Fragen**\n- Welche Lizenz fuer Bibliotheken?");
+
+        writeTools.replaceText("Tetris.md", "Welche Lizenz", "Welche Open-Source-Lizenz", stand("Tetris.md"));
+        assertThat(Files.readString(root.resolve("Tetris.md"))).contains("- Welche Open-Source-Lizenz fuer");
+        try (var history = Files.list(root.resolve(VaultPath.HISTORY_DIR))) {
+            assertThat(history.toList()).hasSize(2);
+        }
+    }
+
+    @Test
+    @DisplayName("replace_text aendert nichts, wenn die Stelle fehlt, mehrdeutig ist oder die Notiz sich geaendert hat")
+    void replaceTextRefusesUnclearChanges() throws IOException {
+        Files.writeString(root.resolve("Tetris.md"), TETRIS);
+        String stand = stand("Tetris.md");
+
+        assertThatThrownBy(() -> writeTools.replaceText("Tetris.md", "Offene Fragen:", "x", stand))
+                .isInstanceOf(ObsidianException.class)
+                .hasMessageContaining("kommt in")
+                .hasMessageContaining("**");
+        assertThatThrownBy(() -> writeTools.replaceText("Tetris.md", "\n- ", "\n* ", stand))
+                .isInstanceOf(ObsidianException.class)
+                .hasMessageContaining("2-mal");
+        Files.writeString(root.resolve("Tetris.md"), TETRIS + "- Von Hand ergaenzt\n");
+        assertThatThrownBy(() -> writeTools.replaceText("Tetris.md", "Welche Lizenz", "x", stand))
+                .isInstanceOf(ObsidianException.class)
+                .hasMessageContaining("geaendert");
+
+        assertThat(Files.readString(root.resolve("Tetris.md"))).isEqualTo(TETRIS + "- Von Hand ergaenzt\n");
     }
 
     @Test

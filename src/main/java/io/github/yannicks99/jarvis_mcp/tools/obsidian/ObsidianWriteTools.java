@@ -100,4 +100,36 @@ public class ObsidianWriteTools {
         return "Abschnitt \"%s\" in \"%s\" ersetzt; die vorherige Fassung liegt in %s."
                 .formatted(heading, updated, VaultPath.HISTORY_DIR);
     }
+
+    // Destruktiv aus demselben Grund wie replace_section.
+    @McpTool(name = "replace_text",
+            annotations = @McpAnnotations(readOnlyHint = false, idempotentHint = false,
+                    destructiveHint = true, openWorldHint = false),
+            description = """
+                    Ersetzt eine genau benannte Textstelle in einer Notiz - fuer alles ohne eigene \
+                    Ueberschrift: einen Punkt einer Liste, eine fett gesetzte Zwischenzeile, einen \
+                    Satz. Mit leerem neuen Text wird die Stelle geloescht. Den bisherigen Text genau \
+                    so angeben, wie read_note ihn zeigt (inklusive ** und Aufzaehlungszeichen); er \
+                    muss genau einmal vorkommen. Ganze Abschnitte unter einer #-Ueberschrift \
+                    besser mit replace_section. Wie dort den "Stand" aus read_note angeben.""")
+    public String replaceText(
+            @McpToolParam(required = true, description = "Pfad der Notiz.")
+            String path,
+            @McpToolParam(required = true,
+                    description = "Der bisherige Text, genau wie in der Notiz, z. B. "
+                            + "\"- Soll es einen Multiplayer-Modus geben?\".")
+            String oldText,
+            @McpToolParam(required = true,
+                    description = "Der neue Text; leer, um die Stelle zu loeschen.")
+            String newText,
+            @McpToolParam(required = true, description = "Der \"Stand\" aus read_note.")
+            String stand) {
+
+        String updated = vault.replaceText(path, oldText, newText, stand);
+        log.info("Textstelle in {} ersetzt ({} -> {} Zeichen)", updated, oldText.length(),
+                newText == null ? 0 : newText.length());
+        return "Textstelle in \"%s\" %s; die vorherige Fassung liegt in %s."
+                .formatted(updated, newText == null || newText.isEmpty() ? "geloescht" : "ersetzt",
+                        VaultPath.HISTORY_DIR);
+    }
 }
